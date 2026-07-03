@@ -1,0 +1,51 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-09-29/server.schema.json",
+  "name": "io.github.marcosnovo/lexvibe",
+  "description": "One-step legal compliance for vibe-coded apps: privacy, terms, cookie banner and EU AI Act check.",
+  "websiteUrl": "https://golexvibe.com",
+  "repository": {
+    "url": "https://github.com/marcosnovo/lexvibe-mcp",
+    "source": "github"
+  },
+  "version": "0.1.3",
+  "remotes": [
+    {
+      "type": "streamable-http",
+      "url": "https://golexvibe.com/api/mcp"
+    }
+  ],
+  "packages": [
+    {
+      "registryType": "npm",
+      "registryBaseUrl": "https://registry.npmjs.org",
+      "identifier": "@lexvibe/mcp",
+      "version": "0.1.3",
+      "runtimeHint": "npx",
+      "transport": {
+        "type": "stdio"
+      },
+      "environmentVariables": [
+        {
+          "name": "LEXVIBE_APP_ID",
+          "description": "Your LexVibe app id (used in the installed snippet and API calls). Optional: if unset, tools ask for the id explicitly and warn about the placeholder.",
+          "isRequired": false,
+          "isSecret": false
+        },
+        {
+          "name": "LEXVIBE_API_URL",
+          "description": "Base URL of the LexVibe API. Only needed for self-hosting / development.",
+          "isRequired": false,
+          "isSecret": false,
+          "default": "https://golexvibe.com"
+        },
+        {
+          "name": "LEXVIBE_CDN_URL",
+          "description": "Base URL the widget script is served from. Only needed for self-hosting / development (defaults to the LexVibe CDN, or to LEXVIBE_API_URL when that is set).",
+          "isRequired": false,
+          "isSecret": false,
+          "default": "https://golexvibe.com"
+        }
+      ]
+    }
+  ]
+}

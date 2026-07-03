@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "lexvibe": {
+      "command": "npx",
+      "args": ["-y", "@lexvibe/mcp"]
+    }
+  }
+}
