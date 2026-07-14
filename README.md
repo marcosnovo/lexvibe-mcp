@@ -117,7 +117,7 @@ Full per-platform setup guide: <https://golexvibe.com/docs/integrations>
 | `LEXVIBE_APP_ID`     | `YOUR_APP_ID`                  | Your LexVibe app id (links the snippet to your hosted policies)  |
 | `LEXVIBE_API_URL`    | `https://golexvibe.com`        | LexVibe instance that generates documents and classifies AI risk |
 | `LEXVIBE_CDN_URL`    | `https://golexvibe.com`        | Host the widget script is served from (self-hosting only)        |
-| `LEXVIBE_EVENTS_URL` | `${LEXVIBE_API_URL}/api/events` | Where anonymous tool-usage events are sent (self-hosting only)   |
+| `LEXVIBE_EVENTS_URL` | LexVibe events endpoint        | Override where anonymous tool-usage events are sent (self-hosting) |
 | `LEXVIBE_TELEMETRY`  | `1`                            | Set to `0` / `false` / `off` to disable usage telemetry          |
 
 ## Usage analytics
@@ -128,8 +128,9 @@ usage shows up alongside your website in the Platform analytics dashboard
 `source: "mcp_stdio"` so the two channels are distinguishable).
 
 - **Anonymous.** The event carries only the tool name, the package version and —
-  if you set a real `LEXVIBE_APP_ID` — that app id. Never your file paths, file
-  contents, app name, emails or generated documents.
+  only when `LEXVIBE_APP_ID` is a real app id (a valid UUID) — that app id, so
+  the events map to your app. Placeholders like `your-app-id` are ignored. Never
+  your file paths, file contents, app name, emails or generated documents.
 - **Non-blocking.** It's fire-and-forget with a 3s timeout: it never delays,
   breaks or fails a tool call, even offline.
 - **Opt-out.** Set `LEXVIBE_TELEMETRY=0` (or the de-facto `DO_NOT_TRACK=1`) to

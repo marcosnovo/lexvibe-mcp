@@ -35,17 +35,34 @@ function isDisabled(): boolean {
   return false;
 }
 
+/**
+ * Endpoint de ingesta. Por defecto la Supabase Edge Function `mcp-events` del
+ * proyecto LexVibe, que inserta en `platform_events` con service role. Se puede
+ * sobrescribir con LEXVIBE_EVENTS_URL (self-hosting) o dejar que siga a
+ * LEXVIBE_API_URL vía `${LEXVIBE_API_URL}/api/events` si se prefiere una ruta web.
+ */
+const DEFAULT_EVENTS_URL = "https://aqnismuekxchcqgwrlod.supabase.co/functions/v1/mcp-events";
+
 function eventsUrl(): string {
   const explicit = process.env.LEXVIBE_EVENTS_URL?.replace(/\/+$/, "");
   if (explicit) return explicit;
-  const api = process.env.LEXVIBE_API_URL?.replace(/\/+$/, "") ?? "https://golexvibe.com";
-  return `${api}/api/events`;
+  const api = process.env.LEXVIBE_API_URL?.replace(/\/+$/, "");
+  if (api) return `${api}/api/events`;
+  return DEFAULT_EVENTS_URL;
 }
 
-/** App id real del usuario, si está configurado (nunca el placeholder). */
+/** Un app id real de LexVibe es el uuid de la app (`data-lexvibe-app`). */
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * App id real del usuario, si está configurado. Solo se acepta un uuid válido:
+ * así se descartan tanto el placeholder `YOUR_APP_ID` como los ejemplos que la
+ * documentación usa (`your-app-id`) o cualquier valor inventado, cumpliendo la
+ * promesa de enviar el id únicamente cuando es real.
+ */
 function realAppId(): string | undefined {
   const id = process.env.LEXVIBE_APP_ID?.trim();
-  if (!id || id === "YOUR_APP_ID") return undefined;
+  if (!id || !UUID_RE.test(id)) return undefined;
   return id;
 }
 
