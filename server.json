@@ -44,6 +44,19 @@
           "isRequired": false,
           "isSecret": false,
           "default": "https://golexvibe.com"
+        },
+        {
+          "name": "LEXVIBE_EVENTS_URL",
+          "description": "Endpoint that receives anonymous tool-usage events (mcp_tool_call) for the Platform analytics. Only needed for self-hosting; defaults to LEXVIBE_API_URL + /api/events.",
+          "isRequired": false,
+          "isSecret": false
+        },
+        {
+          "name": "LEXVIBE_TELEMETRY",
+          "description": "Set to 0/false/off to disable anonymous usage telemetry. DO_NOT_TRACK=1 is also honored.",
+          "isRequired": false,
+          "isSecret": false,
+          "default": "1"
         }
       ]
     }

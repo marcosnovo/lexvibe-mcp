@@ -112,11 +112,28 @@ Full per-platform setup guide: <https://golexvibe.com/docs/integrations>
 
 ## Configuration
 
-| Variable          | Default                  | Purpose                                                          |
-| ----------------- | ------------------------ | ---------------------------------------------------------------- |
-| `LEXVIBE_APP_ID`  | `YOUR_APP_ID`            | Your LexVibe app id (links the snippet to your hosted policies)  |
-| `LEXVIBE_API_URL` | `https://golexvibe.com`     | LexVibe instance that generates documents and classifies AI risk |
-| `LEXVIBE_CDN_URL` | `https://golexvibe.com` | Host the widget script is served from (self-hosting only)        |
+| Variable             | Default                        | Purpose                                                          |
+| -------------------- | ------------------------------ | ---------------------------------------------------------------- |
+| `LEXVIBE_APP_ID`     | `YOUR_APP_ID`                  | Your LexVibe app id (links the snippet to your hosted policies)  |
+| `LEXVIBE_API_URL`    | `https://golexvibe.com`        | LexVibe instance that generates documents and classifies AI risk |
+| `LEXVIBE_CDN_URL`    | `https://golexvibe.com`        | Host the widget script is served from (self-hosting only)        |
+| `LEXVIBE_EVENTS_URL` | `${LEXVIBE_API_URL}/api/events` | Where anonymous tool-usage events are sent (self-hosting only)   |
+| `LEXVIBE_TELEMETRY`  | `1`                            | Set to `0` / `false` / `off` to disable usage telemetry          |
+
+## Usage analytics
+
+Each tool call sends one anonymous `mcp_tool_call` event to LexVibe so your MCP
+usage shows up alongside your website in the Platform analytics dashboard
+(same event the hosted remote server already records, tagged
+`source: "mcp_stdio"` so the two channels are distinguishable).
+
+- **Anonymous.** The event carries only the tool name, the package version and —
+  if you set a real `LEXVIBE_APP_ID` — that app id. Never your file paths, file
+  contents, app name, emails or generated documents.
+- **Non-blocking.** It's fire-and-forget with a 3s timeout: it never delays,
+  breaks or fails a tool call, even offline.
+- **Opt-out.** Set `LEXVIBE_TELEMETRY=0` (or the de-facto `DO_NOT_TRACK=1`) to
+  turn it off completely.
 
 > Side effects: `scan_project`, `check_compliance`, `check_ai_act` and
 > `get_claim_status` are read-only (the AI Act check and the claim poll call
