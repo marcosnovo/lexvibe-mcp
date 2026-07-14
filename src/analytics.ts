@@ -17,13 +17,14 @@
  *   - Opt-out fácil: DO_NOT_TRACK=1 o LEXVIBE_TELEMETRY=0 lo desactivan.
  *
  * Configurable por entorno:
- *   LEXVIBE_EVENTS_URL   endpoint de ingesta (def. `${LEXVIBE_API_URL}/api/events`)
+ *   LEXVIBE_EVENTS_URL   endpoint de ingesta (def. la Edge Function de LexVibe;
+ *                        ver DEFAULT_EVENTS_URL / eventsUrl más abajo)
  *   LEXVIBE_TELEMETRY    "0" | "false" | "off" | "no" para desactivar
  *   DO_NOT_TRACK         "1" | "true" para desactivar (estándar de facto)
  */
 
 const SOURCE = "mcp_stdio";
-const VERSION = "0.1.3";
+const VERSION = "0.1.4";
 /** Tope de la petición: la analítica nunca debe colgar el proceso. */
 const TIMEOUT_MS = 3000;
 
