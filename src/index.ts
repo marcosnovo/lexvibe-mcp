@@ -5,6 +5,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 
+import { trackToolCall } from "./analytics.js";
 import { deriveDefaults, scanProject } from "./detect.js";
 
 /** Datos humanos que el código no puede saber con certeza. */
@@ -108,6 +109,7 @@ server.tool(
   { dir: z.string().describe("Path to the project to analyze (repo root).") },
   { title: "Scan project", readOnlyHint: true, destructiveHint: false, openWorldHint: false },
   async ({ dir }) => {
+    trackToolCall("scan_project");
     try {
       return text(scanProject(dir));
     } catch (err) {
@@ -130,6 +132,7 @@ server.tool(
     openWorldHint: false,
   },
   async ({ dir, appName }) => {
+    trackToolCall("check_compliance");
     try {
       const scan = scanProject(dir);
       const derived = deriveDefaults(dir);
@@ -206,6 +209,7 @@ server.tool(
     openWorldHint: true,
   },
   async ({ appName, entity, contactEmail, markets, locales, answers }) => {
+    trackToolCall("generate_policies");
     const body = {
       answers: {
         appName,
@@ -246,6 +250,7 @@ server.tool(
     openWorldHint: false,
   },
   async ({ file, appId, accent }) => {
+    trackToolCall("install_snippet");
     const id = appId ?? APP_ID;
     const snippet = buildSnippet(id, accent);
     try {
@@ -311,6 +316,7 @@ server.tool(
     openWorldHint: true,
   },
   async (answers) => {
+    trackToolCall("check_ai_act");
     try {
       const res = await fetch(`${API}/api/ai-act/classify`, {
         method: "POST",
@@ -364,6 +370,7 @@ server.tool(
     openWorldHint: true,
   },
   async ({ dir, appName, appId, markets, accent }) => {
+    trackToolCall("make_compliant");
     const id = appId ?? APP_ID;
     const steps: string[] = [];
     const written: string[] = [];
@@ -565,6 +572,7 @@ server.tool(
     openWorldHint: true,
   },
   async ({ url, appName, markets, answers }) => {
+    trackToolCall("claim_app");
     if (!url && !appName) {
       return text({ error: "Provide at least `url` or `appName` to create the claim." });
     }
@@ -613,6 +621,7 @@ server.tool(
     openWorldHint: true,
   },
   async ({ code }) => {
+    trackToolCall("get_claim_status");
     try {
       const res = await fetch(`${API}/api/claim/${encodeURIComponent(code)}`);
       if (res.status === 404) {
