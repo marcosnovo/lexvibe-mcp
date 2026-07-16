@@ -8,16 +8,16 @@ banner with real script blocking, and an EU AI Act risk check.
 
 ## Tools
 
-| Tool                | What it does                                                                                                        |
-| ------------------- | ------------------------------------------------------------------------------------------------------------------- |
-| `make_compliant`    | One step: scan → generate docs into `/legal` → install the banner snippet → classify EU AI Act risk.                |
-| `check_compliance`  | Read-only readiness report: what was detected, what could be auto-derived, and which human facts are still missing. |
-| `scan_project`      | Detect analytics, payments, generative AI, email collection, third parties and platforms (web / iOS / Android).     |
-| `generate_policies` | Generate privacy policy / terms / AI disclosure, localized and tailored per market.                                 |
-| `install_snippet`   | Insert the cookie-banner snippet before `</head>`; for JSX layouts it returns exact instructions instead.           |
-| `check_ai_act`      | Classify EU AI Act risk and list the applicable obligations with deadlines.                                         |
-| `claim_app`         | Create a REAL app in the user's LexVibe account: returns a link the user opens to sign in and confirm (30 min).     |
-| `get_claim_status`  | Poll a claim created with `claim_app`; once confirmed it returns the real app id, install snippet and policy URL.   |
+| Tool                | What it does                                                                                                                                                          |
+| ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `make_compliant`    | One step: scan → generate docs into `/legal` → install the banner snippet → classify EU AI Act risk.                                                                  |
+| `check_compliance`  | Read-only readiness report: what was detected, what could be auto-derived, and which human facts are still missing. Run it again after adding any SDK to catch drift. |
+| `scan_project`      | Detect analytics, payments, generative AI, email collection, third parties and platforms (web / iOS / Android).                                                       |
+| `generate_policies` | Generate privacy policy / terms / AI disclosure, localized and tailored per market.                                                                                   |
+| `install_snippet`   | Insert the cookie-banner snippet before `</head>`; for JSX layouts it returns exact instructions instead.                                                             |
+| `check_ai_act`      | Classify EU AI Act risk and list the applicable obligations with deadlines.                                                                                           |
+| `claim_app`         | Create a REAL app in the user's LexVibe account: returns a link the user opens to sign in and confirm (30 min).                                                       |
+| `get_claim_status`  | Poll a claim created with `claim_app`; once confirmed it returns the real app id, install snippet and policy URL.                                                     |
 
 ## Typical use (natural language)
 
@@ -38,6 +38,29 @@ in and confirm — that creates the real app in **your** LexVibe account (hosted
 auto-updated policies and consent proof linked to you). The agent then picks up
 the real app id via `get_claim_status` and replaces any `YOUR_APP_ID`
 placeholder automatically.
+
+## Keep your policies in sync with your code
+
+Legal documents describe your app as it was when they were generated. Every
+SDK you add afterwards — payments, analytics, auth, AI — is a processing
+activity your documents don't cover yet. LexVibe calls this **drift**, and the
+MCP server is the sensor that lives inside your AI dev loop: the same
+assistant that adds the SDK can catch the compliance gap before you deploy.
+
+Paste this standing rule into your assistant's project rules (`CLAUDE.md`,
+`.cursorrules`, `.windsurfrules`…):
+
+> After adding any SDK, analytics, payments, auth or AI integration to this
+> project, run LexVibe's `check_compliance` tool and follow its
+> recommendation.
+
+When `check_compliance` reports processing activities that were added after
+your documents were generated, re-run `generate_policies` (or
+`make_compliant`) so the documents disclose the new processing. Claimed apps
+are also watched by LexVibe's other drift sensors (periodic site rechecks and
+the GitHub integration), and the remote `check_website` tool returns a `drift`
+section for claimed apps comparing the live site against the baseline the
+documents were generated from.
 
 ## Quickstart
 
@@ -99,11 +122,11 @@ account. Stdio-only clients can bridge to it with
 
 ### Which integration to use, per platform
 
-| Platform                              | Integration       | How                                                  |
-| ------------------------------------- | ----------------- | ---------------------------------------------------- |
-| Claude Code                           | stdio (or remote) | `claude mcp add lexvibe -- npx -y @lexvibe/mcp`      |
-| Cursor / Windsurf / Cline / VS Code   | stdio             | `mcpServers` config with `npx -y @lexvibe/mcp`       |
-| Zed                                   | stdio (or remote) | `context_servers` in `settings.json`                 |
+| Platform                              | Integration       | How                                                     |
+| ------------------------------------- | ----------------- | ------------------------------------------------------- |
+| Claude Code                           | stdio (or remote) | `claude mcp add lexvibe -- npx -y @lexvibe/mcp`         |
+| Cursor / Windsurf / Cline / VS Code   | stdio             | `mcpServers` config with `npx -y @lexvibe/mcp`          |
+| Zed                                   | stdio (or remote) | `context_servers` in `settings.json`                    |
 | Claude Desktop / claude.ai            | remote            | Settings → Connectors → `https://golexvibe.com/api/mcp` |
 | ChatGPT                               | remote            | Settings → Connectors → `https://golexvibe.com/api/mcp` |
 | Lovable / Bolt / v0 / Base44 / Replit | prompt (no MCP)   | Paste the one-liner from <https://golexvibe.com/prompt> |
