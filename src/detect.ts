@@ -396,8 +396,13 @@ export function classifyAiUsage(
     }
     if (!AI_RE.test(content)) continue;
     for (const [re, name] of AI_PROVIDER_RES) if (re.test(content)) providers.add(name);
-    if (BACKEND_PATH_RE.test(p)) backendHit = true;
-    else userHit = true; // evidencia en cliente
+    // Un nombre de chat/asistente manda sobre la ruta backend genérica: un
+    // handler de API que implementa el chat (app/api/chat/route.ts) SÍ es de
+    // cara al usuario, aunque viva bajo api/. Si no, cualquier chatbot servido
+    // por una API route (patrón habitual en Next.js) se clasificaba como
+    // "solo servidor" y se perdía el aviso obligatorio del art. 50 AI Act.
+    if (CLIENT_AI_PATH_RE.test(p)) userHit = true;
+    else if (BACKEND_PATH_RE.test(p)) backendHit = true;
   }
   const mode = userHit ? "user" : backendHit ? "backend" : hasAiDependency ? "backend" : "none";
   return { mode, providers: [...providers] };
