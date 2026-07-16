@@ -6,6 +6,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { z } from "zod";
 
 import { trackToolCall } from "./analytics.js";
+
 import { deriveDefaults, scanProject } from "./detect.js";
 
 /** Datos humanos que el código no puede saber con certeza. */
@@ -74,6 +75,19 @@ const CDN =
   (process.env.LEXVIBE_API_URL ? API : "https://golexvibe.com");
 const APP_ID = process.env.LEXVIBE_APP_ID ?? "YOUR_APP_ID";
 
+/**
+ * Nota para el agente cuando los documentos salen de la plantilla estándar
+ * (generación anónima sin IA) — mismo mensaje que el MCP remoto, para que el
+ * agente pueda avisar al usuario de que aún no están personalizados.
+ */
+const TEMPLATE_NOTE = `Generated from the standard template — not yet AI-personalized for this app and not reviewed by a human lawyer. For AI-tailored documents that are hosted, versioned and auto-updated when regulations change, create the app at ${API}/dashboard/activate.`;
+
+/** ¿Algún documento devuelto por /api/generate salió de la plantilla (no IA)? */
+function hasTemplateDocs(documents: { source?: string }[] | undefined): boolean {
+  // Sin `source` explícito asumimos plantilla: la generación anónima nunca usa IA.
+  return (documents ?? []).some((d) => d.source !== "ai");
+}
+
 /** El snippet canónico — misma forma que buildSnippet() en apps/web. */
 function buildSnippet(id: string, accent?: string): string {
   return `<script src="${CDN}/v1/lexvibe-widget.js" data-lexvibe-app="${id}" data-config="${API}/api/widget-config/${id}" data-ingest="${API}/api/consent"${accent ? ` data-accent="${accent}"` : ""} defer></script>`;
@@ -85,10 +99,10 @@ function buildJsxSnippet(id: string, accent?: string): string {
 }
 
 const server = new McpServer(
-  { name: "lexvibe", version: "0.1.4" },
+  { name: "lexvibe", version: "0.1.5" },
   {
     instructions:
-      "LexVibe makes vibe-coded apps (Lovable, Bolt, v0, Next.js, plain HTML) legally compliant: GDPR privacy policy, terms of service, cookie consent banner with real script blocking, and EU AI Act risk classification. When the user asks to make their app legally compliant, GDPR-ready, or to add a privacy policy / terms / cookie banner, call make_compliant first (one step). Use check_compliance for a read-only readiness report, scan_project to detect data processing, generate_policies for documents only, install_snippet to add the cookie banner to a specific file, and check_ai_act to classify EU AI Act risk. If no real LexVibe app id is configured (LEXVIBE_APP_ID missing or a placeholder), call claim_app to get a link the user opens to create a real app in their account, then poll get_claim_status for the real app id and snippet.",
+      "LexVibe makes vibe-coded apps (Lovable, Bolt, v0, Next.js, plain HTML) legally compliant: GDPR privacy policy, terms of service, cookie consent banner with real script blocking, and EU AI Act risk classification. When the user asks to make their app legally compliant, GDPR-ready, or to add a privacy policy / terms / cookie banner, call make_compliant first (one step). Use check_compliance for a read-only readiness report, scan_project to detect data processing, generate_policies for documents only, install_snippet to add the cookie banner to a specific file, and check_ai_act to classify EU AI Act risk. If no real LexVibe app id is configured (LEXVIBE_APP_ID missing or a placeholder), call claim_app to get a link the user opens to create a real app in their account, then poll get_claim_status for the real app id and snippet. Legal documents describe the app as it was when they were generated: after adding any SDK, analytics, payments, auth or AI integration, run check_compliance again and regenerate the documents if it reports processing they don't cover yet.",
   },
 );
 
@@ -120,7 +134,7 @@ server.tool(
 
 server.tool(
   "check_compliance",
-  "Read-only compliance readiness check: scans the project, detects platforms and data processing, auto-derives what it can (app name, legal entity, contact email) and reports which human facts are still missing (including target markets). Returns an agentPrompt you (the dev agent) can answer from the repo, so document generation needs no forms. Call it before make_compliant when you want to confirm facts first.",
+  "Read-only compliance readiness check. Run this after adding any SDK, analytics, payment, auth or AI integration — it reports the processing activities currently detected in the code, so you (the agent) can spot any that were added after the legal documents were generated and aren't covered yet. It scans the project, detects platforms and data processing, auto-derives what it can (app name, legal entity, contact email) and reports which human facts are still missing (including target markets). Returns an agentPrompt you (the dev agent) can answer from the repo, so document generation needs no forms. Call it before make_compliant when you want to confirm facts first.",
   {
     dir: z.string().describe("Project root path."),
     appName: z.string().optional().describe("Override the auto-derived app name."),
@@ -159,6 +173,12 @@ server.tool(
               note: 'Target markets are missing. If you proceed to make_compliant without them, markets default to ["eu"] — confirm with the user before accepting that default.',
             }
           : {}),
+        // Recordatorio de deriva: este servidor es local/anónimo y no tiene
+        // acceso a la foto `signals_snapshot` de una app reclamada, así que no
+        // puede hacer el diff él mismo; se lo encarga al agente que lee el
+        // informe (que sí sabe qué integraciones acaba de añadir).
+        driftNote:
+          "Legal documents only cover the processing that existed when they were generated. If any detected activity above (analytics, payments, generative AI, email collection, third-party sharing) was added AFTER the documents were generated, they are out of date: re-run generate_policies (or make_compliant) with the current answers so they disclose the new processing.",
         agentPrompt: buildAgentPrompt(missing, (answers.appName as string) ?? "this product"),
       });
     } catch (err) {
@@ -227,7 +247,15 @@ server.tool(
         body: JSON.stringify(body),
       });
       if (!res.ok) return text({ error: `API ${res.status}` });
-      return text(await res.json());
+      const data = (await res.json()) as {
+        documents?: { docType: string; locale: string; content: string; source?: string }[];
+      };
+      // Expone el origen real (ai/plantilla): el agente debe poder avisar de
+      // que un documento de plantilla aún no está personalizado para la app.
+      return text({
+        ...data,
+        ...(hasTemplateDocs(data.documents) ? { note: TEMPLATE_NOTE } : {}),
+      });
     } catch (err) {
       return text({ error: `Could not generate: ${(err as Error).message}` });
     }
@@ -374,6 +402,9 @@ server.tool(
     const id = appId ?? APP_ID;
     const steps: string[] = [];
     const written: string[] = [];
+    // Origen real por documento (ai/plantilla), para que el agente sepa si los
+    // ficheros de /legal son genéricos y pueda decírselo al usuario.
+    const docsWritten: { path: string; docType: string; locale: string; source: string }[] = [];
 
     // 1) Escanear el proyecto y deducir lo que se pueda (cero formularios).
     let answers: Record<string, unknown> = {};
@@ -416,7 +447,7 @@ server.tool(
       });
       if (res.ok) {
         const data = (await res.json()) as {
-          documents?: { docType: string; locale: string; content: string }[];
+          documents?: { docType: string; locale: string; content: string; source?: string }[];
         };
         const legalDir = join(dir, "legal");
         mkdirSync(legalDir, { recursive: true });
@@ -424,8 +455,18 @@ server.tool(
           const path = join(legalDir, `${doc.docType}.${doc.locale}.md`);
           writeFileSync(path, doc.content, "utf8");
           written.push(path);
+          // Sin `source` explícito asumimos plantilla (la generación anónima nunca usa IA).
+          docsWritten.push({
+            path,
+            docType: doc.docType,
+            locale: doc.locale,
+            source: doc.source === "ai" ? "ai" : "template",
+          });
         }
-        steps.push(`Documents generated: ${written.length} files in /legal.`);
+        steps.push(
+          `Documents generated: ${written.length} files in /legal` +
+            (hasTemplateDocs(data.documents) ? " (template-based, not AI-personalized)." : "."),
+        );
       } else {
         steps.push(`Generation: API responded ${res.status}.`);
       }
@@ -492,9 +533,16 @@ server.tool(
       /* opcional */
     }
 
+    const anyTemplate = docsWritten.some((d) => d.source === "template");
     return text({
       done: steps,
       filesWritten: written,
+      // Origen por documento; `source` global resume el conjunto.
+      documents: docsWritten,
+      ...(docsWritten.length > 0
+        ? { source: docsWritten.every((d) => d.source === "ai") ? "ai" : "template" }
+        : {}),
+      ...(anyTemplate ? { note: TEMPLATE_NOTE } : {}),
       snippet,
       aiAct,
       // Datos humanos que el código no pudo deducir. Como agente con acceso al
