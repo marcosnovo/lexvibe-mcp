@@ -134,7 +134,7 @@ server.tool(
 
 server.tool(
   "check_compliance",
-  "Read-only compliance readiness check. Run this after adding any SDK, analytics, payment, auth or AI integration — it detects processing activities your legal documents don't cover yet. It scans the project, detects platforms and data processing, auto-derives what it can (app name, legal entity, contact email) and reports which human facts are still missing (including target markets). Returns an agentPrompt you (the dev agent) can answer from the repo, so document generation needs no forms. Call it before make_compliant when you want to confirm facts first.",
+  "Read-only compliance readiness check. Run this after adding any SDK, analytics, payment, auth or AI integration — it reports the processing activities currently detected in the code, so you (the agent) can spot any that were added after the legal documents were generated and aren't covered yet. It scans the project, detects platforms and data processing, auto-derives what it can (app name, legal entity, contact email) and reports which human facts are still missing (including target markets). Returns an agentPrompt you (the dev agent) can answer from the repo, so document generation needs no forms. Call it before make_compliant when you want to confirm facts first.",
   {
     dir: z.string().describe("Project root path."),
     appName: z.string().optional().describe("Override the auto-derived app name."),
