@@ -77,7 +77,8 @@ const RULES: Rule[] = [
     signal: "processesPayments",
     vendor: "RevenueCat",
     deps: /react-native-purchases|purchases_flutter/,
-    code: /RevenueCat|purchases_flutter/i,
+    // Import/uso real, NO una mención en un comentario ("RevenueCat data: …").
+    code: /import\s+RevenueCat|RevenueCat\.configure|Purchases\.configure|purchases_flutter/i,
   },
   {
     signal: "processesPayments",
@@ -93,15 +94,43 @@ const RULES: Rule[] = [
 ];
 
 const SCAN_DIRS = ["src", "app", "pages", "components", "public", "lib"];
-const TEXT_EXT = /\.(tsx?|jsx?|html?|vue|svelte|astro|mdx?)$/;
+// OJO: `.md` NO es código — un doc de investigación que menciona "AdMob" o
+// "ATTrackingManager" no significa que la app lo integre (falso positivo real
+// en Refil). `.mdx` sí (lleva JSX ejecutable).
+const TEXT_EXT = /\.(tsx?|jsx?|html?|vue|svelte|astro|mdx)$/;
 const MAX_FILES = 400;
 
 /** Manifiestos de apps móviles (iOS / Android / Flutter / Expo) por nombre exacto. */
+// `project.pbxproj` es EL manifiesto de dependencias de iOS (paquetes SPM:
+// GoogleSignIn, Supabase…) además de declarar knownRegions y entitlements.
 const MANIFEST_FILE =
-  /^(Info\.plist|GoogleService-Info\.plist|AndroidManifest\.xml|Podfile|pubspec\.yaml|app\.json|app\.config\.(?:js|ts|cjs|mjs)|eas\.json|google-services\.json|capacitor\.config\.(?:json|ts))$/;
+  /^(Info\.plist|GoogleService-Info\.plist|AndroidManifest\.xml|Podfile|project\.pbxproj|pubspec\.yaml|app\.json|app\.config\.(?:js|ts|cjs|mjs)|eas\.json|google-services\.json|capacitor\.config\.(?:json|ts))$/;
 /** Manifiestos por extensión (gradle, privacy manifest, entitlements…). */
 const MANIFEST_EXT = /\.(plist|gradle|gradle\.kts|xcprivacy|entitlements|podspec)$/;
 const MAX_MANIFESTS = 60;
+
+/**
+ * Hechos ESTRUCTURADOS del proyecto (mismo shape que `AnalysisFacts` del
+ * dashboard): anclan la generación de documentos en evidencia, no en priors.
+ * Viajan en el payload del claim y el dashboard los convierte en el manifiesto
+ * de tratamientos.
+ */
+export interface ScanFacts {
+  authMethods: ("apple" | "google" | "email" | "other")[];
+  payments: "apple_iap" | "google_play" | "stripe" | "other" | "none";
+  ai: {
+    /** IA generativa DE CARA AL USUARIO (chatbot, contenido generado visible). */
+    userFacing: boolean;
+    /** IA solo en servidor (p. ej. clasificar contenido público). */
+    serverSide: boolean;
+    /** ¿Trata datos personales de usuarios? Solo con evidencia. */
+    processesPersonalData: boolean;
+    providers: string[];
+  };
+  tracking: { idfa: boolean; att: boolean; adSdks: boolean };
+  /** Claves estables: precise_location, background_location, push_notifications… */
+  devicePermissions: string[];
+}
 
 export interface ProjectScan {
   signals: { signal: SignalKey; vendors: string[] }[];
@@ -109,6 +138,10 @@ export interface ProjectScan {
   /** Plataformas detectadas (web / iOS / Android). */
   platforms: Platform[];
   suggestedAnswers: Record<string, boolean>;
+  /** Hechos estructurados para el manifiesto de tratamientos del dashboard. */
+  facts: ScanFacts;
+  /** Idiomas que la app soporta (carpetas lproj/values-xx/locales, xcstrings). */
+  locales: string[];
 }
 
 /** Datos humanos que LexVibe necesita y que intentamos deducir del repo. */
@@ -208,6 +241,239 @@ export function deriveDefaults(dir: string): DerivedDefaults {
   return out;
 }
 
+/** Carpetas de dependencias/artefactos: sus archivos NO son de la app. */
+const VENDOR_DIR_RE =
+  /^(node_modules|Pods|Carthage|DerivedData|build|dist|vendor|Vendor|Frameworks|\.build|\.swiftpm)$|\.(xc)?framework$/;
+
+/** Rutas relativas del proyecto (sin dependencias), acotadas. */
+function collectPaths(dir: string): string[] {
+  const out: string[] = [];
+  const walk = (current: string, rel: string, depth: number) => {
+    if (depth > 5 || out.length > 4000) return;
+    let entries: string[] = [];
+    try {
+      entries = readdirSync(current);
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      if (entry.startsWith(".") || VENDOR_DIR_RE.test(entry)) continue;
+      const full = join(current, entry);
+      const relPath = rel ? `${rel}/${entry}` : entry;
+      let s;
+      try {
+        s = statSync(full);
+      } catch {
+        continue;
+      }
+      if (s.isDirectory()) walk(full, relPath, depth + 1);
+      else out.push(relPath);
+      if (out.length > 4000) return;
+    }
+  };
+  walk(dir, "", 0);
+  return out;
+}
+
+const LOCALE_CODES = new Set(["es", "en", "fr", "de", "it", "pt", "nl", "ja", "zh", "ko", "hi", "ar"]);
+
+function normLocale(code: string): string | null {
+  const c = code.toLowerCase().slice(0, 2);
+  return LOCALE_CODES.has(c) ? c : null;
+}
+
+/** Idiomas de la app: carpetas de localización + String Catalogs (.xcstrings). */
+export function detectLocales(dir: string, paths: string[]): string[] {
+  const set = new Set<string>();
+  for (const p of paths) {
+    const lproj = p.match(/(?:^|\/)([A-Za-z-]+)\.lproj(?:\/|$)/);
+    if (lproj?.[1] && lproj[1].toLowerCase() !== "base") {
+      const l = normLocale(lproj[1]);
+      if (l) set.add(l);
+    }
+    const android = p.match(/(?:^|\/)values-([a-z]{2})(?:[-/]|$)/i);
+    if (android?.[1]) {
+      const l = normLocale(android[1]);
+      if (l) set.add(l);
+    }
+    const web = p.match(/(?:^|\/)(?:locales|messages|i18n|lang|translations|intl)\/([a-z]{2})(?:[-_/.]|$)/i);
+    if (web?.[1]) {
+      const l = normLocale(web[1]);
+      if (l) set.add(l);
+    }
+  }
+  // String Catalogs de Xcode: las localizaciones viven DENTRO del JSON.
+  for (const p of paths.filter((x) => x.endsWith(".xcstrings")).slice(0, 4)) {
+    try {
+      const json = JSON.parse(readFileSync(join(dir, p), "utf8")) as {
+        strings?: Record<string, { localizations?: Record<string, unknown> }>;
+      };
+      for (const entry of Object.values(json.strings ?? {})) {
+        for (const code of Object.keys(entry.localizations ?? {})) {
+          const l = normLocale(code);
+          if (l) set.add(l);
+        }
+      }
+    } catch {
+      /* xcstrings no parseable */
+    }
+  }
+  return [...set];
+}
+
+const AI_RE =
+  /@anthropic-ai|anthropic|claude-[a-z0-9.-]+|ANTHROPIC_API_KEY|api\.openai\.com|OPENAI_API_KEY|from\s+['"]openai['"]|import\s+OpenAI\b|GoogleGenerativeAI|generativelanguage\.googleapis/i;
+const BACKEND_PATH_RE =
+  /(?:^|\/)(?:api|server|backend|backend-workers|worker|workers|functions|mcp-server)\//i;
+const CLIENT_AI_PATH_RE = /(chat|assistant|copilot|conversation|prompt|generat)/i;
+const CODE_FILE_RE = /\.(swift|kt|m|mm|tsx?|jsx?|py|rb|go)$/i;
+
+/**
+ * Clasifica el uso de IA leyendo DÓNDE vive la evidencia (mismo criterio que el
+ * dashboard): en fuente de cliente o ruta de chat/asistente ⇒ de cara al
+ * usuario (aplica art. 50); solo en rutas de backend ⇒ solo servidor (no se
+ * inventa un asistente); sin evidencia en archivos ⇒ conservador: solo servidor.
+ * Una dependencia npm suelta NUNCA implica un chatbot.
+ */
+/**
+ * Fuente NATIVA de alta señal (Swift/Kotlin): `readSource` solo lee código web
+ * (TEXT_EXT), así que StoreKit, CoreLocation o TelemetryService serían
+ * invisibles. Se leen los archivos nativos cuyo NOMBRE delata una categoría de
+ * cumplimiento (cobertura por categoría, como la vía GitHub), acotado.
+ */
+function readNativeSignalFiles(dir: string, paths: string[]): string {
+  const NATIVE_RE = /\.(swift|kt|m|mm)$/i;
+  const KEYWORD_RE =
+    /(auth|login|signin|account|paywall|purchase|subscription|storekit|entitlement|billing|telemetry|analytic|consent|track|location|notification|push|sync|email|profile)/i;
+  let out = "";
+  let count = 0;
+  for (const p of paths) {
+    if (count >= 40) break;
+    if (!NATIVE_RE.test(p) || !KEYWORD_RE.test(p)) continue;
+    try {
+      const full = join(dir, p);
+      if (statSync(full).size > 200_000) continue;
+      out += readFileSync(full, "utf8") + "\n";
+      count++;
+    } catch {
+      /* ignore */
+    }
+  }
+  return out;
+}
+
+const AI_PROVIDER_RES: [RegExp, string][] = [
+  [/@anthropic-ai|anthropic|claude-[a-z0-9.-]+|ANTHROPIC_API_KEY/i, "Anthropic (Claude)"],
+  [/api\.openai\.com|OPENAI_API_KEY|from\s+['"]openai['"]|import\s+OpenAI\b/i, "OpenAI"],
+  [/GoogleGenerativeAI|generativelanguage\.googleapis/i, "Google Gemini"],
+];
+
+export function classifyAiUsage(
+  dir: string,
+  paths: string[],
+  hasAiDependency: boolean,
+): { mode: "none" | "backend" | "user"; providers: string[] } {
+  // PRIORIDAD: primero los archivos de backend y los de nombre chat/asistente
+  // (donde vive la evidencia decisiva) y DESPUÉS el resto de fuente nativa. Sin
+  // este orden, una app iOS con cientos de .swift llenaba el cupo antes de
+  // llegar a `backend-workers/` y la IA del servidor quedaba invisible.
+  const code = paths.filter((p) => CODE_FILE_RE.test(p));
+  const primary = code.filter((p) => BACKEND_PATH_RE.test(p) || CLIENT_AI_PATH_RE.test(p));
+  const rest = code.filter((p) => !primary.includes(p) && /\.(swift|kt|m|mm)$/i.test(p));
+  const candidates = [...primary.slice(0, 80), ...rest.slice(0, 40)];
+
+  const providers = new Set<string>();
+  let backendHit = false;
+  let userHit = false;
+  for (const p of candidates) {
+    let content = "";
+    try {
+      const full = join(dir, p);
+      if (statSync(full).size > 200_000) continue;
+      content = readFileSync(full, "utf8");
+    } catch {
+      continue;
+    }
+    if (!AI_RE.test(content)) continue;
+    for (const [re, name] of AI_PROVIDER_RES) if (re.test(content)) providers.add(name);
+    if (BACKEND_PATH_RE.test(p)) backendHit = true;
+    else userHit = true; // evidencia en cliente
+  }
+  const mode = userHit ? "user" : backendHit ? "backend" : hasAiDependency ? "backend" : "none";
+  return { mode, providers: [...providers] };
+}
+
+/** Hechos estructurados a partir de los blobs + clasificación de IA por rutas. */
+export function collectFacts(
+  dir: string,
+  paths: string[],
+  depBlob: string,
+  code: string,
+  aiVendors: string[],
+): ScanFacts {
+  const blob = depBlob + "\n" + code;
+
+  const authMethods: ScanFacts["authMethods"] = [];
+  if (/AuthenticationServices|ASAuthorizationAppleID|SignInWithApple|applesignin|sign_in_with_apple/i.test(blob))
+    authMethods.push("apple");
+  if (/GoogleSignIn|GIDSignIn|google_sign_in|@react-oauth\/google/i.test(blob)) authMethods.push("google");
+  if (/signInWithPassword|signInWithOtp|createUserWithEmail|next-auth|magic[ -]?link|EmailAuth/i.test(blob))
+    authMethods.push("email");
+
+  const payments: ScanFacts["payments"] = /import\s+StoreKit|StoreKit2|SKPayment|in_app_purchase|react-native-iap|expo-in-app-purchases/i.test(
+    blob,
+  )
+    ? "apple_iap"
+    : /BillingClient|com\.android\.billingclient|com\.android\.vending\.BILLING/i.test(blob)
+      ? "google_play"
+      : /js\.stripe\.com|new Stripe\(|@stripe\//i.test(blob)
+        ? "stripe"
+        : /paddle|lemonsqueezy|braintree|paypal/i.test(blob)
+          ? "other"
+          : "none";
+
+  const att = /NSUserTrackingUsageDescription|ATTrackingManager|AppTrackingTransparency/i.test(blob);
+  const adSdks =
+    /GoogleMobileAds|GADApplication|google_mobile_ads|react-native-google-mobile-ads|FBAudienceNetwork|AppLovin|ironSource/i.test(
+      blob,
+    );
+
+  const devicePermissions: string[] = [];
+  if (/NSLocation\w*UsageDescription|CLLocationManager|ACCESS_FINE_LOCATION/i.test(blob)) {
+    devicePermissions.push("precise_location");
+    if (/NSLocationAlways|allowsBackgroundLocationUpdates|ACCESS_BACKGROUND_LOCATION/i.test(blob))
+      devicePermissions.push("background_location");
+  }
+  if (/aps-environment|registerForRemoteNotifications|firebase_messaging|expo-notifications/i.test(blob))
+    devicePermissions.push("push_notifications");
+  if (/NSCameraUsageDescription|android\.permission\.CAMERA/i.test(blob)) devicePermissions.push("camera");
+  if (/NSPhotoLibrary\w*UsageDescription/i.test(blob)) devicePermissions.push("photos");
+  if (/NSContactsUsageDescription|READ_CONTACTS/i.test(blob)) devicePermissions.push("contacts");
+  if (/NSMicrophoneUsageDescription|RECORD_AUDIO/i.test(blob)) devicePermissions.push("microphone");
+  if (/HealthKit|NSHealth\w*UsageDescription/i.test(blob)) devicePermissions.push("health");
+
+  const ai = classifyAiUsage(dir, paths, aiVendors.length > 0);
+  // Colapsa nombres subsumidos ("Anthropic" ⊂ "Anthropic (Claude)").
+  const merged = [...new Set([...aiVendors, ...ai.providers])];
+  const providers = merged.filter(
+    (v) => !merged.some((o) => o !== v && o.toLowerCase().startsWith(v.toLowerCase())),
+  );
+  return {
+    authMethods,
+    payments,
+    ai: {
+      userFacing: ai.mode === "user",
+      serverSide: ai.mode !== "none",
+      // Solo afirmamos tratamiento de datos personales por IA si es de cara al
+      // usuario (sus entradas viajan al proveedor).
+      processesPersonalData: ai.mode === "user",
+      providers,
+    },
+    tracking: { idfa: att || adSdks, att, adSdks },
+    devicePermissions,
+  };
+}
+
 export function scanProject(dir: string): ProjectScan {
   let pkgText = "";
   const deps: string[] = [];
@@ -223,12 +489,25 @@ export function scanProject(dir: string): ProjectScan {
   }
 
   const manifests = readManifests(dir);
-  const code = readSource(dir) + "\n" + manifests.text;
+  // Rutas del proyecto (sin dependencias): para idiomas, clasificación de IA
+  // por ubicación del archivo, fuente nativa y package.json ANIDADOS.
+  const paths = collectPaths(dir);
+  const code = readSource(dir) + "\n" + manifests.text + "\n" + readNativeSignalFiles(dir, paths);
   // Los manifiestos móviles (pubspec.yaml, Gradle, Podfile, app.json…) son TAMBIÉN
   // declaraciones de dependencias: van a depBlob para que las reglas `deps`
   // (google_mobile_ads, in_app_purchase, firebase_core, amplitude…) acierten en
-  // apps Flutter/nativas que no tienen package.json.
-  const depBlob = deps.join("\n") + "\n" + pkgText + "\n" + manifests.text;
+  // apps Flutter/nativas que no tienen package.json. Los package.json anidados
+  // (backend-workers/, functions/…) delatan los vendors de SERVIDOR (Resend,
+  // Anthropic) que el package.json raíz no lista.
+  let nestedPkgs = "";
+  for (const p of paths.filter((x) => x !== "package.json" && x.endsWith("/package.json")).slice(0, 6)) {
+    try {
+      nestedPkgs += readFileSync(join(dir, p), "utf8") + "\n";
+    } catch {
+      /* ignore */
+    }
+  }
+  const depBlob = deps.join("\n") + "\n" + pkgText + "\n" + manifests.text + "\n" + nestedPkgs;
 
   const byKey = new Map<SignalKey, Set<string>>();
   for (const rule of RULES) {
@@ -251,7 +530,22 @@ export function scanProject(dir: string): ProjectScan {
 
   const platforms = detectPlatforms(dir, manifests.found, deps, manifests.text);
 
-  return { signals, packages: deps, platforms, suggestedAnswers };
+  // Hechos estructurados + idiomas: la MISMA inteligencia que la vía GitHub del
+  // dashboard, pero con acceso total al filesystem (aún más fiable). Viajan en
+  // el claim y anclan la generación en evidencia.
+  const aiVendors = (byKey.get("usesGenerativeAI") && [...byKey.get("usesGenerativeAI")!]) || [];
+  const facts = collectFacts(dir, paths, depBlob, code, aiVendors);
+  const locales = detectLocales(dir, paths);
+
+  // IA solo de servidor: NO es un sistema de IA para el usuario → no
+  // pre-marcamos usesGenerativeAI (evita el aviso art. 50 inventado). El
+  // proveedor sigue listado como tercero.
+  if (suggestedAnswers.usesGenerativeAI && !facts.ai.userFacing) {
+    delete suggestedAnswers.usesGenerativeAI;
+    suggestedAnswers.sharesWithThirdParties = true;
+  }
+
+  return { signals, packages: deps, platforms, suggestedAnswers, facts, locales };
 }
 
 interface ManifestScan {

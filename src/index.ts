@@ -4,9 +4,7 @@ import { join } from "node:path";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
-
 import { trackToolCall } from "./analytics.js";
-
 import { deriveDefaults, scanProject } from "./detect.js";
 
 /** Datos humanos que el código no puede saber con certeza. */
@@ -82,6 +80,16 @@ const APP_ID = process.env.LEXVIBE_APP_ID ?? "YOUR_APP_ID";
  */
 const TEMPLATE_NOTE = `Generated from the standard template — not yet AI-personalized for this app and not reviewed by a human lawyer. For AI-tailored documents that are hosted, versioned and auto-updated when regulations change, create the app at ${API}/dashboard/activate.`;
 
+/**
+ * Datos que el código NO puede saber y que el humano debe completar tras crear
+ * la app (draft-first). El agente los relee de get_claim_status y se los pide al
+ * usuario. En inglés (superficie de descubrimiento del MCP).
+ */
+const PENDING_LABEL: Record<string, string> = {
+  controller_legal_name: "the controller's legal/registered name and address (you or your company)",
+  privacy_contact_email: "a privacy contact email",
+};
+
 /** ¿Algún documento devuelto por /api/generate salió de la plantilla (no IA)? */
 function hasTemplateDocs(documents: { source?: string }[] | undefined): boolean {
   // Sin `source` explícito asumimos plantilla: la generación anónima nunca usa IA.
@@ -99,7 +107,7 @@ function buildJsxSnippet(id: string, accent?: string): string {
 }
 
 const server = new McpServer(
-  { name: "lexvibe", version: "0.1.5" },
+  { name: "lexvibe", version: "0.1.6" },
   {
     instructions:
       "LexVibe makes vibe-coded apps (Lovable, Bolt, v0, Next.js, plain HTML) legally compliant: GDPR privacy policy, terms of service, cookie consent banner with real script blocking, and EU AI Act risk classification. When the user asks to make their app legally compliant, GDPR-ready, or to add a privacy policy / terms / cookie banner, call make_compliant first (one step). Use check_compliance for a read-only readiness report, scan_project to detect data processing, generate_policies for documents only, install_snippet to add the cookie banner to a specific file, and check_ai_act to classify EU AI Act risk. If no real LexVibe app id is configured (LEXVIBE_APP_ID missing or a placeholder), call claim_app to get a link the user opens to create a real app in their account, then poll get_claim_status for the real app id and snippet. Legal documents describe the app as it was when they were generated: after adding any SDK, analytics, payments, auth or AI integration, run check_compliance again and regenerate the documents if it reports processing they don't cover yet.",
@@ -119,7 +127,7 @@ function text(value: unknown) {
 
 server.tool(
   "scan_project",
-  "Read-only scan of a local project (dependencies + source code + mobile manifests). Detects data processing relevant to legal compliance — analytics, payments, generative AI, email collection, third-party sharing — and the product platforms (web / iOS / Android). Use it to gather the suggestedAnswers that generate_policies expects, or call make_compliant to do everything in one step.",
+  "Read-only scan of a local project (dependencies + source code + mobile manifests). Detects data processing relevant to legal compliance — analytics, payments, generative AI (distinguishing user-facing AI from server-side-only AI), email collection, third-party sharing — plus structured `facts` (auth methods, payments channel, AI flags, tracking/IDFA, device permissions), the `locales` the app supports and the product platforms (web / iOS / Android). Pass suggestedAnswers to generate_policies, and pass `facts`, `locales` and `signals` to claim_app so the generated documents are anchored in evidence.",
   { dir: z.string().describe("Path to the project to analyze (repo root).") },
   { title: "Scan project", readOnlyHint: true, destructiveHint: false, openWorldHint: false },
   async ({ dir }) => {
@@ -134,7 +142,7 @@ server.tool(
 
 server.tool(
   "check_compliance",
-  "Read-only compliance readiness check. Run this after adding any SDK, analytics, payment, auth or AI integration — it reports the processing activities currently detected in the code, so you (the agent) can spot any that were added after the legal documents were generated and aren't covered yet. It scans the project, detects platforms and data processing, auto-derives what it can (app name, legal entity, contact email) and reports which human facts are still missing (including target markets). Returns an agentPrompt you (the dev agent) can answer from the repo, so document generation needs no forms. Call it before make_compliant when you want to confirm facts first.",
+  "Read-only compliance readiness check. Run this after adding any SDK, analytics, payment, auth or AI integration — it detects processing activities your legal documents don't cover yet. It scans the project, detects platforms and data processing, auto-derives what it can (app name, legal entity, contact email) and reports which human facts are still missing (including target markets). Returns an agentPrompt you (the dev agent) can answer from the repo, so document generation needs no forms. Call it before make_compliant when you want to confirm facts first.",
   {
     dir: z.string().describe("Project root path."),
     appName: z.string().optional().describe("Override the auto-derived app name."),
@@ -612,6 +620,20 @@ server.tool(
       .describe(
         "Compliance flags you already know (pass scan_project's suggestedAnswers): usesAnalytics, processesPayments, usesGenerativeAI, collectsEmails, sharesWithThirdParties, platformType, companyEntity, contactEmail…",
       ),
+    facts: z
+      .record(z.unknown())
+      .optional()
+      .describe(
+        "scan_project's `facts` (structured evidence: auth methods, payments, AI flags, tracking, device permissions). Pass it through unchanged — it anchors the generated documents in evidence.",
+      ),
+    locales: z
+      .array(z.string())
+      .optional()
+      .describe("scan_project's `locales` — languages the app actually supports."),
+    signals: z
+      .array(z.object({ signal: z.string(), vendors: z.array(z.string()) }))
+      .optional()
+      .describe("scan_project's `signals` — detected processing with vendor names."),
   },
   {
     title: "Claim a real LexVibe app",
@@ -619,7 +641,7 @@ server.tool(
     destructiveHint: false,
     openWorldHint: true,
   },
-  async ({ url, appName, markets, answers }) => {
+  async ({ url, appName, markets, answers, facts, locales, signals }) => {
     trackToolCall("claim_app");
     if (!url && !appName) {
       return text({ error: "Provide at least `url` or `appName` to create the claim." });
@@ -636,7 +658,7 @@ server.tool(
       const res = await fetch(`${API}/api/claim/start`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ url, appName, markets, answers, platform }),
+        body: JSON.stringify({ url, appName, markets, answers, platform, facts, locales, signals }),
       });
       if (!res.ok) {
         const err = (await res.json().catch(() => null)) as { error?: string } | null;
@@ -660,7 +682,7 @@ server.tool(
 
 server.tool(
   "get_claim_status",
-  "Check whether the user has confirmed a claim created with claim_app. While the user hasn't confirmed yet it returns {status: 'pending'} — wait a few seconds and call again (the link expires in 30 minutes). Once claimed it returns the REAL app id, the install snippet and the hosted privacy-policy URL: replace any placeholder (YOUR_APP_ID) snippet with the real one.",
+  "Check whether the user has confirmed a claim created with claim_app. While the user hasn't confirmed yet it returns {status: 'pending'} — wait a few seconds and call again (the link expires in 30 minutes). Once claimed it returns the REAL app id, the install snippet, the hosted privacy-policy URL and a `pending` list of details the code can't know (e.g. the controller's legal name) that the user must still provide: replace any placeholder (YOUR_APP_ID) snippet with the real one, and ask the user for the pending items so the documents can be published.",
   { code: z.string().describe("The claim code returned by claim_app.") },
   {
     title: "Get claim status",
@@ -684,12 +706,24 @@ server.tool(
         appId?: string;
         snippet?: string | null;
         policyUrl?: string;
+        pending?: string[];
       };
       if (data.status === "claimed") {
+        // Datos que el humano debe COMPLETAR (draft-first): el código no puede
+        // saberlos, así que el agente se los pide al usuario en vez de dejar
+        // placeholders silenciosos en los documentos.
+        const reviewItems = (data.pending ?? [])
+          .map((k) => PENDING_LABEL[k])
+          .filter((v): v is string => Boolean(v));
+        const reviewNote =
+          reviewItems.length > 0
+            ? ` Before the documents can be published, the user still needs to provide: ${reviewItems.join("; ")}. Ask them for these and complete them in the LexVibe document editor (they are marked as [to complete] in the documents).`
+            : "";
         return text({
           ...data,
           instructions:
-            "The app is claimed. Use this real app id from now on: replace any placeholder (YOUR_APP_ID) snippet with the snippet above (install_snippet accepts an appId argument), and use policyUrl as the privacy-policy link. Suggest the user sets LEXVIBE_APP_ID to this id in their MCP config.",
+            "The app is claimed. Use this real app id from now on: replace any placeholder (YOUR_APP_ID) snippet with the snippet above (install_snippet accepts an appId argument), and use policyUrl as the privacy-policy link. Suggest the user sets LEXVIBE_APP_ID to this id in their MCP config." +
+            reviewNote,
         });
       }
       if (data.status === "expired") {

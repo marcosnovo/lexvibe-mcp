@@ -7,7 +7,7 @@
     "url": "https://github.com/marcosnovo/lexvibe-mcp",
     "source": "github"
   },
-  "version": "0.1.5",
+  "version": "0.1.6",
   "remotes": [
     {
       "type": "streamable-http",
@@ -19,7 +19,7 @@
       "registryType": "npm",
       "registryBaseUrl": "https://registry.npmjs.org",
       "identifier": "@lexvibe/mcp",
-      "version": "0.1.5",
+      "version": "0.1.6",
       "runtimeHint": "npx",
       "transport": {
         "type": "stdio"
