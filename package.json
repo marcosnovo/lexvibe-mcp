@@ -1,6 +1,6 @@
 {
   "name": "@lexvibe/mcp",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "mcpName": "io.github.marcosnovo/lexvibe",
   "description": "LexVibe MCP server — one-step legal compliance for vibe-coded apps: privacy policy, terms of service, cookie consent banner and EU AI Act check from Claude Code, Cursor or any MCP client.",
   "license": "MIT",

@@ -13,6 +13,8 @@ banner with real script blocking, and an EU AI Act risk check.
 | `make_compliant`    | One step: scan → generate docs into `/legal` → install the banner snippet → classify EU AI Act risk.                                                                  |
 | `check_compliance`  | Read-only readiness report: what was detected, what could be auto-derived, and which human facts are still missing. Run it again after adding any SDK to catch drift. |
 | `scan_project`      | Detect analytics, payments, generative AI, email collection, third parties and platforms (web / iOS / Android).                                                       |
+| `check_website`     | Free, no-signup compliance check of a **deployed** site by URL: per-vendor signals, recommendations and EU AI Act applicability (the same public checker as `/check`). |
+| `verify_snippet`    | Fetch a deployed URL and confirm the cookie-banner snippet is actually live in the served HTML (`ok` / `missing` / `unknown`).                                        |
 | `generate_policies` | Generate privacy policy / terms / AI disclosure, localized and tailored per market.                                                                                   |
 | `install_snippet`   | Insert the cookie-banner snippet before `</head>`; for JSX layouts it returns exact instructions instead.                                                             |
 | `check_ai_act`      | Classify EU AI Act risk and list the applicable obligations with deadlines.                                                                                           |
@@ -56,11 +58,14 @@ Paste this standing rule into your assistant's project rules (`CLAUDE.md`,
 
 When `check_compliance` reports processing activities that were added after
 your documents were generated, re-run `generate_policies` (or
-`make_compliant`) so the documents disclose the new processing. Claimed apps
+`make_compliant`) so the documents disclose the new processing. The same
+applies to the deployed site: `check_website` detects the trackers that
+actually ship to visitors, so you can catch drift the local scan can't see
+(scripts injected by a CMS, a tag manager, a no-code platform…). Claimed apps
 are also watched by LexVibe's other drift sensors (periodic site rechecks and
-the GitHub integration), and the remote `check_website` tool returns a `drift`
-section for claimed apps comparing the live site against the baseline the
-documents were generated from.
+the GitHub integration), and the remote `check_website` tool additionally
+returns a `drift` section for claimed apps comparing the live site against
+the baseline the documents were generated from.
 
 ## Quickstart
 
@@ -159,9 +164,11 @@ usage shows up alongside your website in the Platform analytics dashboard
 - **Opt-out.** Set `LEXVIBE_TELEMETRY=0` (or the de-facto `DO_NOT_TRACK=1`) to
   turn it off completely.
 
-> Side effects: `scan_project`, `check_compliance`, `check_ai_act` and
-> `get_claim_status` are read-only (the AI Act check and the claim poll call
-> the LexVibe API). `generate_policies` calls the API and returns Markdown.
+> Side effects: `scan_project`, `check_compliance`, `check_website`,
+> `verify_snippet`, `check_ai_act` and `get_claim_status` are read-only
+> (`check_website`, the AI Act check and the claim poll call the LexVibe API;
+> `verify_snippet` fetches the URL you pass it — public http(s) hosts only,
+> with the same anti-SSRF validation the platform uses). `generate_policies` calls the API and returns Markdown.
 > `install_snippet` edits one file on your local filesystem (only when it
 > contains `</head>`). `make_compliant` does both: it calls the API **and**
 > writes files (`/legal/*.md` plus the snippet in your HTML head).

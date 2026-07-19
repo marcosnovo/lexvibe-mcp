@@ -24,7 +24,7 @@
  */
 
 const SOURCE = "mcp_stdio";
-const VERSION = "0.1.6";
+const VERSION = "0.1.7";
 /** Tope de la petición: la analítica nunca debe colgar el proceso. */
 const TIMEOUT_MS = 3000;
 
