@@ -51,6 +51,10 @@ function buildAgentPrompt(missing: { id: string; hint: string }[], appName: stri
  *   - make_compliant: todo en un paso (scan + docs + snippet + AI Act).
  *   - scan_project: detecta qué usa el proyecto (analítica, pagos, IA, terceros).
  *   - check_compliance: informe de preparación (solo lectura) + agentPrompt.
+ *   - check_website: checker público de una web DESPLEGADA (mismo /api/check
+ *     que la página /check de la plataforma; gratis, sin registro).
+ *   - verify_snippet: comprueba que el banner está VIVO en el sitio desplegado
+ *     (mismo criterio que /api/verify: marcador del snippet en el HTML servido).
  *   - generate_policies: genera privacidad/términos/aviso IA (multi-jurisdicción).
  *   - install_snippet: inserta el snippet del banner en el HTML/layout.
  *   - check_ai_act: clasifica el riesgo según el EU AI Act.
@@ -96,21 +100,46 @@ function hasTemplateDocs(documents: { source?: string }[] | undefined): boolean 
   return (documents ?? []).some((d) => d.source !== "ai");
 }
 
+/** Marcador único que inyecta el snippet — igual que SNIPPET_MARKER en apps/web. */
+const SNIPPET_MARKER = "data-lexvibe-app";
+
+interface SnippetOptions {
+  accent?: string;
+  position?: string;
+  lang?: string;
+}
+
+/** Atributos del snippet — misma forma que buildSnippet() en apps/web/src/lib/snippet.ts. */
+function snippetAttrs(id: string, opts: SnippetOptions): string {
+  return [
+    `src="${CDN}/v1/lexvibe-widget.js"`,
+    `${SNIPPET_MARKER}="${id}"`,
+    `data-config="${API}/api/widget-config/${id}"`,
+    `data-ingest="${API}/api/consent"`,
+    opts.accent ? `data-accent="${opts.accent}"` : null,
+    opts.position ? `data-position="${opts.position}"` : null,
+    opts.lang ? `data-lang="${opts.lang}"` : null,
+    "defer",
+  ]
+    .filter(Boolean)
+    .join(" ");
+}
+
 /** El snippet canónico — misma forma que buildSnippet() en apps/web. */
-function buildSnippet(id: string, accent?: string): string {
-  return `<script src="${CDN}/v1/lexvibe-widget.js" data-lexvibe-app="${id}" data-config="${API}/api/widget-config/${id}" data-ingest="${API}/api/consent"${accent ? ` data-accent="${accent}"` : ""} defer></script>`;
+function buildSnippet(id: string, opts: SnippetOptions = {}): string {
+  return `<script ${snippetAttrs(id, opts)}></script>`;
 }
 
 /** Versión JSX del snippet, para layouts React (Next.js App Router, etc.). */
-function buildJsxSnippet(id: string, accent?: string): string {
-  return `<script src="${CDN}/v1/lexvibe-widget.js" data-lexvibe-app="${id}" data-config="${API}/api/widget-config/${id}" data-ingest="${API}/api/consent"${accent ? ` data-accent="${accent}"` : ""} defer />`;
+function buildJsxSnippet(id: string, opts: SnippetOptions = {}): string {
+  return `<script ${snippetAttrs(id, opts)} />`;
 }
 
 const server = new McpServer(
-  { name: "lexvibe", version: "0.1.6" },
+  { name: "lexvibe", version: "0.1.7" },
   {
     instructions:
-      "LexVibe makes vibe-coded apps (Lovable, Bolt, v0, Next.js, plain HTML) legally compliant: GDPR privacy policy, terms of service, cookie consent banner with real script blocking, and EU AI Act risk classification. When the user asks to make their app legally compliant, GDPR-ready, or to add a privacy policy / terms / cookie banner, call make_compliant first (one step). Use check_compliance for a read-only readiness report, scan_project to detect data processing, generate_policies for documents only, install_snippet to add the cookie banner to a specific file, and check_ai_act to classify EU AI Act risk. If no real LexVibe app id is configured (LEXVIBE_APP_ID missing or a placeholder), call claim_app to get a link the user opens to create a real app in their account, then poll get_claim_status for the real app id and snippet. Legal documents describe the app as it was when they were generated: after adding any SDK, analytics, payments, auth or AI integration, run check_compliance again and regenerate the documents if it reports processing they don't cover yet.",
+      "LexVibe makes vibe-coded apps (Lovable, Bolt, v0, Next.js, plain HTML) legally compliant: GDPR privacy policy, terms of service, cookie consent banner with real script blocking, and EU AI Act risk classification. When the user asks to make their app legally compliant, GDPR-ready, or to add a privacy policy / terms / cookie banner, call make_compliant first (one step). Use check_compliance for a read-only readiness report, scan_project to detect data processing, check_website for a free no-signup compliance check of a DEPLOYED site by URL, generate_policies for documents only, install_snippet to add the cookie banner to a specific file, check_ai_act to classify EU AI Act risk, and verify_snippet after deploying to confirm the cookie banner is actually live on the site. If no real LexVibe app id is configured (LEXVIBE_APP_ID missing or a placeholder), call claim_app to get a link the user opens to create a real app in their account, then poll get_claim_status for the real app id and snippet. Legal documents describe the app as it was when they were generated: after adding any SDK, analytics, payments, auth or AI integration, run check_compliance again and regenerate the documents if it reports processing they don't cover yet.",
   },
 );
 
@@ -276,7 +305,15 @@ server.tool(
   {
     file: z.string().describe("File to install into (index.html, app/layout.tsx…)."),
     appId: z.string().optional().describe("App id (defaults to LEXVIBE_APP_ID)."),
-    accent: z.string().optional(),
+    accent: z.string().optional().describe("Accent color for the banner (CSS color)."),
+    position: z
+      .enum(["bottom", "bottom-left", "bottom-right"])
+      .optional()
+      .describe("Banner position on the page."),
+    lang: z
+      .string()
+      .optional()
+      .describe("Force the banner language (ISO 639-1); defaults to auto-detect."),
   },
   {
     title: "Install cookie-banner snippet",
@@ -285,10 +322,11 @@ server.tool(
     idempotentHint: true,
     openWorldHint: false,
   },
-  async ({ file, appId, accent }) => {
+  async ({ file, appId, accent, position, lang }) => {
     trackToolCall("install_snippet");
     const id = appId ?? APP_ID;
-    const snippet = buildSnippet(id, accent);
+    const opts = { accent, position, lang };
+    const snippet = buildSnippet(id, opts);
     try {
       let content = readFileSync(file, "utf8");
       if (content.includes("lexvibe-widget.js")) {
@@ -315,7 +353,7 @@ server.tool(
         snippet,
         instructions: [
           "Add the snippet manually. For a Next.js App Router root layout (app/layout.tsx), add a <head> element inside <html> in the returned JSX and place this self-closing script inside it:",
-          `<head>\n  ${buildJsxSnippet(id, accent)}\n</head>`,
+          `<head>\n  ${buildJsxSnippet(id, opts)}\n</head>`,
           'Alternatively, use Next\'s <Script> component (import Script from "next/script") in the layout body with the same src and data-* attributes and strategy="afterInteractive".',
           "For plain HTML files, paste the snippet right before </head>:",
           snippet,
@@ -367,6 +405,112 @@ server.tool(
   },
 );
 
+/** Normaliza un dominio/URL a URL absoluta https — igual que /api/check y /api/verify. */
+function normalizeUrl(domain: string): string {
+  const trimmed = domain.trim().replace(/\/+$/, "");
+  return /^https?:\/\//.test(trimmed) ? trimmed : `https://${trimmed}`;
+}
+
+server.tool(
+  "check_website",
+  "Free, no-signup compliance check of a DEPLOYED website by URL (the same public checker as the LexVibe /check page). Fetches the live page server-side and detects tracking/processing that actually ships to visitors — analytics, marketing pixels, payments, generative AI, email capture, third parties — and returns per-vendor signals plus concrete recommendations (which documents/banner the site needs) and whether the EU AI Act applies. Complements scan_project (which reads the local source): use check_website after deploying, or for a site whose code you don't have.",
+  {
+    url: z
+      .string()
+      .describe("Public URL (or bare domain) of the deployed site, e.g. https://myapp.com"),
+  },
+  {
+    title: "Check a deployed website",
+    readOnlyHint: true,
+    destructiveHint: false,
+    openWorldHint: true,
+  },
+  async ({ url }) => {
+    trackToolCall("check_website");
+    try {
+      const res = await fetch(`${API}/api/check`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url }),
+      });
+      if (res.status === 429) {
+        return text({ error: "Rate limited — wait a minute and try again." });
+      }
+      if (!res.ok) return text({ error: `API ${res.status}` });
+      const data = (await res.json()) as {
+        url: string;
+        signals: { signal: string; vendors: string[] }[];
+        recommendations: { id: string; title: string; reason: string }[];
+        aiAct: boolean;
+      };
+      return text({
+        ...data,
+        // Mismo aviso de deriva que check_compliance: lo detectado en el sitio
+        // vivo debe estar cubierto por los documentos generados.
+        driftNote:
+          "If any signal above (analytics, marketing pixels, payments, generative AI, email capture, third parties) is not disclosed by the site's current legal documents, they are out of date: re-run generate_policies (or make_compliant) so they cover it.",
+      });
+    } catch (err) {
+      return text({ error: `Could not check the website: ${(err as Error).message}` });
+    }
+  },
+);
+
+server.tool(
+  "verify_snippet",
+  "Verify that the LexVibe cookie-banner snippet is actually LIVE on a deployed site: fetches the public URL and looks for the widget marker in the served HTML. Run it after deploying (install_snippet edits local files — this confirms the change reached production). Returns {status: 'ok' | 'missing' | 'unknown'}. If 'missing', the snippet was not found: check that the deploy included the change, or re-run install_snippet and deploy again.",
+  {
+    url: z.string().describe("Public URL (or bare domain) of the deployed site to verify."),
+  },
+  {
+    title: "Verify the snippet is live",
+    readOnlyHint: true,
+    destructiveHint: false,
+    openWorldHint: true,
+  },
+  async ({ url }) => {
+    trackToolCall("verify_snippet");
+    const target = normalizeUrl(url);
+    // Mismo criterio que /api/verify en la plataforma: marcador del snippet o
+    // nombre del script del widget presentes en el HTML servido.
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 15_000);
+    try {
+      const res = await fetch(target, {
+        headers: { "User-Agent": "LexVibe-Verifier/1.0 (mcp-stdio)" },
+        signal: controller.signal,
+      });
+      if (!res.ok) {
+        return text({
+          status: "unknown",
+          checkedUrl: target,
+          error: `The site responded ${res.status}.`,
+        });
+      }
+      const html = await res.text();
+      const found = html.includes(SNIPPET_MARKER) || html.includes("lexvibe-widget.js");
+      return text({
+        status: found ? "ok" : "missing",
+        checkedUrl: target,
+        ...(found
+          ? { detail: "The LexVibe snippet is live on this page." }
+          : {
+              detail:
+                "The LexVibe snippet was NOT found in the served HTML. If you just installed it, make sure the change was deployed; note this check reads the initial HTML only, so a snippet injected client-side after load won't be detected.",
+            }),
+      });
+    } catch (err) {
+      return text({
+        status: "unknown",
+        checkedUrl: target,
+        error: `Could not reach the site: ${(err as Error).message}`,
+      });
+    } finally {
+      clearTimeout(timer);
+    }
+  },
+);
+
 server.tool(
   "make_compliant",
   "One-step legal compliance: scan the project, generate privacy policy / terms / cookie & AI disclosures (written to /legal), install the cookie-banner snippet into the HTML head, and classify EU AI Act risk. Use this first when the user asks to make their app legally compliant, GDPR-ready, or to add a privacy policy or cookie banner. Returns a summary, any missing human facts, and next steps.",
@@ -397,7 +541,15 @@ server.tool(
         ]),
       )
       .default(["eu"]),
-    accent: z.string().optional(),
+    accent: z.string().optional().describe("Accent color for the banner (CSS color)."),
+    position: z
+      .enum(["bottom", "bottom-left", "bottom-right"])
+      .optional()
+      .describe("Banner position on the page."),
+    lang: z
+      .string()
+      .optional()
+      .describe("Force the banner language (ISO 639-1); defaults to auto-detect."),
   },
   {
     title: "Make app compliant (one step)",
@@ -405,7 +557,7 @@ server.tool(
     destructiveHint: false,
     openWorldHint: true,
   },
-  async ({ dir, appName, appId, markets, accent }) => {
+  async ({ dir, appName, appId, markets, accent, position, lang }) => {
     trackToolCall("make_compliant");
     const id = appId ?? APP_ID;
     const steps: string[] = [];
@@ -485,7 +637,8 @@ server.tool(
     // 3) Instalar el snippet del banner de cookies. Solo aplica a web: una app
     // nativa no tiene <head> ni cookies del navegador (su consentimiento se
     // gestiona con manifiestos de la tienda y, si acaso, un SDK de consentimiento).
-    const snippet = buildSnippet(id, accent);
+    const snippetOpts = { accent, position, lang };
+    const snippet = buildSnippet(id, snippetOpts);
     if (isWeb) {
       const candidates = [
         "app/layout.tsx",
@@ -517,7 +670,7 @@ server.tool(
       steps.push(
         installedIn
           ? `Snippet installed in ${installedIn}.`
-          : `No file with a literal </head> was found, so nothing was modified (writing raw HTML into a JSX/TSX layout would break it). Add the snippet manually — plain HTML, before </head>:\n${snippet}\nOr, in a Next.js App Router layout (app/layout.tsx), add a <head> element inside <html> containing:\n${buildJsxSnippet(id, accent)}`,
+          : `No file with a literal </head> was found, so nothing was modified (writing raw HTML into a JSX/TSX layout would break it). Add the snippet manually — plain HTML, before </head>:\n${snippet}\nOr, in a Next.js App Router layout (app/layout.tsx), add a <head> element inside <html> containing:\n${buildJsxSnippet(id, snippetOpts)}`,
       );
     } else {
       steps.push(
@@ -570,6 +723,11 @@ server.tool(
             ]
           : []),
         "Review the drafts in /legal and fill in any bracketed placeholder fields (e.g. [complete: …]).",
+        ...(isWeb
+          ? [
+              "After deploying, run verify_snippet with the site's public URL to confirm the cookie banner is actually live.",
+            ]
+          : []),
         ...(isMobile
           ? [
               "Add the hosted Privacy Policy URL to the App Store Connect / Google Play Console listing.",
