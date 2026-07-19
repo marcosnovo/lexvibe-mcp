@@ -6,6 +6,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { z } from "zod";
 import { trackToolCall } from "./analytics.js";
 import { deriveDefaults, scanProject } from "./detect.js";
+import { readCapped, safeFetch } from "./ssrf.js";
 
 /** Datos humanos que el código no puede saber con certeza. */
 const HUMAN_FACTS: { id: string; hint: string }[] = [
@@ -458,7 +459,7 @@ server.tool(
 
 server.tool(
   "verify_snippet",
-  "Verify that the LexVibe cookie-banner snippet is actually LIVE on a deployed site: fetches the public URL and looks for the widget marker in the served HTML. Run it after deploying (install_snippet edits local files — this confirms the change reached production). Returns {status: 'ok' | 'missing' | 'unknown'}. If 'missing', the snippet was not found: check that the deploy included the change, or re-run install_snippet and deploy again.",
+  "Verify that the LexVibe cookie-banner snippet is actually LIVE on a deployed site: fetches the public URL and looks for the widget marker in the served HTML. Run it after deploying (install_snippet edits local files — this confirms the change reached production). Only public http(s) hosts are allowed — localhost, private-network and reserved addresses are rejected. Returns {status: 'ok' | 'missing' | 'unknown'}. If 'missing', the snippet was not found: check that the deploy included the change, or re-run install_snippet and deploy again.",
   {
     url: z.string().describe("Public URL (or bare domain) of the deployed site to verify."),
   },
@@ -472,13 +473,13 @@ server.tool(
     trackToolCall("verify_snippet");
     const target = normalizeUrl(url);
     // Mismo criterio que /api/verify en la plataforma: marcador del snippet o
-    // nombre del script del widget presentes en el HTML servido.
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 15_000);
+    // nombre del script del widget presentes en el HTML servido. safeFetch
+    // aplica la misma defensa anti-SSRF que la plataforma: solo destinos
+    // http(s) públicos, revalidando cada redirección — esta herramienta corre
+    // en la máquina del usuario y no debe poder sondear su red interna.
     try {
-      const res = await fetch(target, {
+      const res = await safeFetch(target, {
         headers: { "User-Agent": "LexVibe-Verifier/1.0 (mcp-stdio)" },
-        signal: controller.signal,
       });
       if (!res.ok) {
         return text({
@@ -487,7 +488,7 @@ server.tool(
           error: `The site responded ${res.status}.`,
         });
       }
-      const html = await res.text();
+      const html = await readCapped(res);
       const found = html.includes(SNIPPET_MARKER) || html.includes("lexvibe-widget.js");
       return text({
         status: found ? "ok" : "missing",
@@ -505,8 +506,6 @@ server.tool(
         checkedUrl: target,
         error: `Could not reach the site: ${(err as Error).message}`,
       });
-    } finally {
-      clearTimeout(timer);
     }
   },
 );

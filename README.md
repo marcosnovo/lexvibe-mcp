@@ -167,7 +167,8 @@ usage shows up alongside your website in the Platform analytics dashboard
 > Side effects: `scan_project`, `check_compliance`, `check_website`,
 > `verify_snippet`, `check_ai_act` and `get_claim_status` are read-only
 > (`check_website`, the AI Act check and the claim poll call the LexVibe API;
-> `verify_snippet` fetches the URL you pass it). `generate_policies` calls the API and returns Markdown.
+> `verify_snippet` fetches the URL you pass it — public http(s) hosts only,
+> with the same anti-SSRF validation the platform uses). `generate_policies` calls the API and returns Markdown.
 > `install_snippet` edits one file on your local filesystem (only when it
 > contains `</head>`). `make_compliant` does both: it calls the API **and**
 > writes files (`/legal/*.md` plus the snippet in your HTML head).
