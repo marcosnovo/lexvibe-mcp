@@ -1,6 +1,6 @@
 {
   "name": "@lexvibe/mcp",
-  "version": "0.1.7",
+  "version": "0.1.8",
   "mcpName": "io.github.marcosnovo/lexvibe",
   "description": "LexVibe MCP server — one-step legal compliance for vibe-coded apps: privacy policy, terms of service, cookie consent banner and EU AI Act check from Claude Code, Cursor or any MCP client.",
   "license": "MIT",
@@ -32,7 +32,15 @@
     "bolt",
     "v0",
     "claude",
-    "cursor"
+    "cursor",
+    "privacy-policy-generator",
+    "terms-generator",
+    "cookie-consent-banner",
+    "consent-management",
+    "dpa",
+    "windsurf",
+    "chatgpt",
+    "base44"
   ],
   "bin": {
     "lexvibe-mcp": "dist/index.js"
@@ -51,6 +59,8 @@
     "build": "tsc",
     "dev": "node --experimental-strip-types src/index.ts",
     "typecheck": "tsc --noEmit",
+    "smoke": "node scripts/smoke.mjs",
+    "test": "node --test scripts/*.test.mjs",
     "prepublishOnly": "npm run build"
   },
   "dependencies": {

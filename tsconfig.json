@@ -7,6 +7,8 @@
     "outDir": "dist",
     "rootDir": "src",
     "strict": true,
+    "allowImportingTsExtensions": true,
+    "rewriteRelativeImportExtensions": true,
     "noUncheckedIndexedAccess": true,
     "noUnusedLocals": true,
     "noUnusedParameters": true,
