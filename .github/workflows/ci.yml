@@ -18,10 +18,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      # Sin `cache: npm`: este repo ignora package-lock.json a propósito
+      # (.gitignore), y setup-node falla si se le pide caché sin lockfile.
+      # Son dos dependencias; el ahorro no compensa.
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: npm
       - run: npm install
       - run: npm run typecheck
       - run: npm run build
