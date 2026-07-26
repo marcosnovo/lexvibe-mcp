@@ -433,6 +433,10 @@ server.tool(
     automatedDecisions: z.boolean().default(false),
     socialScoring: z.boolean().default(false),
     realtimeBiometricPublic: z.boolean().default(false),
+    // Cualificador del art. 5.1.h: sin él la prohibición era inalcanzable y un
+    // sistema policial de biometría en tiempo real salía "alto riesgo, 2027"
+    // en vez de "prohibido, ya en vigor".
+    realtimeBiometricLawEnforcement: z.boolean().default(false),
     annexIII: z.array(z.string()).default([]),
   },
   {

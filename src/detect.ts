@@ -139,8 +139,9 @@ const MAX_FILES = 400;
 /** Manifiestos de apps móviles (iOS / Android / Flutter / Expo) por nombre exacto. */
 // `project.pbxproj` es EL manifiesto de dependencias de iOS (paquetes SPM:
 // GoogleSignIn, Supabase…) además de declarar knownRegions y entitlements.
-// `Package.swift` también: en proyectos SPM puros es el único manifiesto de
-// dependencias (FirebaseAnalytics, Supabase…) y además delata iOS.
+// `Package.swift` también, como manifiesto de DEPENDENCIAS (FirebaseAnalytics,
+// Supabase…) en proyectos SPM puros. Como evidencia de PLATAFORMA no vale: un
+// servidor Vapor también es un paquete SwiftPM (ver detectPlatforms).
 const MANIFEST_FILE =
   /^(Info\.plist|GoogleService-Info\.plist|AndroidManifest\.xml|Podfile|project\.pbxproj|Package\.swift|pubspec\.yaml|app\.json|app\.config\.(?:js|ts|cjs|mjs)|eas\.json|google-services\.json|capacitor\.config\.(?:json|ts))$/;
 /** Manifiestos por extensión (gradle, privacy manifest, entitlements…). */
@@ -351,9 +352,14 @@ const LOCALE_CODES = new Set([
 ]);
 
 function normLocale(code: string): string | null {
-  // Separa por región/script ("pt-BR", "zh_Hans", Android "b+es+419") en vez de
-  // truncar: "fil".slice(0,2) daba "fi" (finés) y las carpetas b+ nunca casaban.
-  const c = code.toLowerCase().split(/[-_+]/)[0] ?? "";
+  // Separa por región/script ("pt-BR", "zh_Hans") en vez de truncar:
+  // "fil".slice(0,2) daba "fi" (finés).
+  //
+  // El prefijo BCP-47 de Android ("b+es+419") se quita ANTES de separar: si no,
+  // el primer segmento es la propia "b" y la carpeta no casaba nunca — una app
+  // con values-b+es+419 no reportaba español y se quedaba sin sus documentos.
+  const raw = code.toLowerCase().replace(/^b\+/, "");
+  const c = raw.split(/[-_+]/)[0] ?? "";
   return LOCALE_CODES.has(c) ? c : null;
 }
 
@@ -366,7 +372,9 @@ export function detectLocales(dir: string, paths: string[]): string[] {
       const l = normLocale(lproj[1]);
       if (l) set.add(l);
     }
-    const android = p.match(/(?:^|\/)values-([a-z]{2})(?:[-/]|$)/i);
+    // Cualificador COMPLETO, no dos letras: "values-b+es+419" no empieza por
+    // dos letras seguidas de separador, así que con `[a-z]{2}` no casaba nada.
+    const android = p.match(/(?:^|\/)values-([a-z]{2,3}|b\+[a-z+0-9-]+)(?:[-/]|$)/i);
     if (android?.[1]) {
       const l = normLocale(android[1]);
       if (l) set.add(l);
@@ -404,6 +412,8 @@ const BACKEND_PATH_RE =
   /(?:^|\/)(?:api|server|backend|backend-workers|worker|workers|functions|mcp-server)\//i;
 const CLIENT_AI_PATH_RE = /(chat|assistant|copilot|conversation|prompt|generat)/i;
 const CODE_FILE_RE = /\.(swift|kt|m|mm|dart|tsx?|jsx?|py|rb|go)$/i;
+/** Fuente nativa: sin convención de rutas equivalente a "todo lo que no es api/ es cliente". */
+const NATIVE_EXT_RE = /\.(swift|kt|m|mm|dart)$/i;
 
 /**
  * Clasifica el uso de IA leyendo DÓNDE vive la evidencia (mismo criterio que el
@@ -445,6 +455,20 @@ const AI_PROVIDER_RES: [RegExp, string][] = [
   [/GoogleGenerativeAI|generativelanguage\.googleapis/i, "Google Gemini"],
 ];
 
+/**
+ * ¿Hay evidencia de que esto es una APP nativa (iOS/Android/Flutter) y no un
+ * servicio escrito en Swift/Kotlin? Decide cómo leer un .swift/.kt/.dart cuya
+ * ruta no dice nada: en una app, la fuente nativa es cliente; en un servidor
+ * Vapor o Ktor, no lo es.
+ */
+function hasNativeAppEvidence(paths: string[]): boolean {
+  return paths.some((p) =>
+    /(?:^|\/)(?:Info\.plist|AndroidManifest\.xml|Podfile|project\.pbxproj|pubspec\.yaml|GoogleService-Info\.plist|google-services\.json)$/i.test(
+      p,
+    ),
+  );
+}
+
 export function classifyAiUsage(
   dir: string,
   paths: string[],
@@ -459,6 +483,7 @@ export function classifyAiUsage(
   const rest = code.filter((p) => !primary.includes(p) && /\.(swift|kt|m|mm|dart)$/i.test(p));
   const candidates = [...primary.slice(0, 80), ...rest.slice(0, 40)];
 
+  const nativeApp = hasNativeAppEvidence(paths);
   const providers = new Set<string>();
   let backendHit = false;
   let userHit = false;
@@ -480,7 +505,13 @@ export function classifyAiUsage(
     // "solo servidor" y se perdía el aviso obligatorio del art. 50 del AI Act.
     if (CLIENT_AI_PATH_RE.test(p)) userHit = true;
     else if (BACKEND_PATH_RE.test(p)) backendHit = true;
-    else userHit = true; // evidencia en cliente
+    else if (NATIVE_EXT_RE.test(p) && !nativeApp) {
+      // Fuente nativa en un repo SIN evidencia de app (un servidor Vapor o
+      // Ktor): que la ruta no diga "api/" no significa que el usuario hable con
+      // la IA. `Sources/App/OpenAIService.swift` es servidor, y darlo por
+      // user-facing pone un aviso del art. 50 en documentos que no lo necesitan.
+      backendHit = true;
+    } else userHit = true; // evidencia en cliente
   }
   const mode = userHit ? "user" : backendHit ? "backend" : hasAiDependency ? "backend" : "none";
   return { mode, providers: [...providers] };
@@ -722,7 +753,7 @@ function readManifests(dir: string): ManifestScan {
 }
 
 /** Deduce las plataformas a partir de los manifiestos y dependencias. */
-function detectPlatforms(
+export function detectPlatforms(
   dir: string,
   found: Set<string>,
   deps: string[],
@@ -762,10 +793,15 @@ function detectPlatforms(
     found.has("Podfile") ||
     found.has("GoogleService-Info.plist") ||
     // Proyectos iOS modernos (SPM, Xcode 13+): sin Info.plist ni Podfile, pero
-    // siempre con project.pbxproj (y a menudo Package.swift). Mismo criterio
-    // que detectPlatform en apps/web/src/lib/github/analyze.ts.
+    // siempre con project.pbxproj. Mismo criterio que detectPlatform en
+    // apps/web/src/lib/github/analyze.ts.
+    //
+    // `Package.swift` NO cuenta por sí solo: un servidor Vapor o una librería
+    // de macOS/Linux es un paquete SwiftPM sin nada de iOS, y clasificarlo como
+    // iOS hacía que make_compliant se saltara el banner de cookies y soltara
+    // instrucciones de la App Store. Sigue en MANIFEST_FILE porque como
+    // manifiesto de DEPENDENCIAS sí vale; como evidencia de plataforma, no.
     found.has("project.pbxproj") ||
-    found.has("Package.swift") ||
     found.has("*.podspec")
   ) {
     set.add("ios");

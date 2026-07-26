@@ -31,3 +31,5 @@ jobs:
       # binario publicado no levanta o que una herramienta desaparece.
       - name: Smoke test (stdio)
         run: node scripts/smoke.mjs
+      - name: Detector tests
+        run: npm test

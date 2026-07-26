@@ -60,6 +60,7 @@
     "dev": "node --experimental-strip-types src/index.ts",
     "typecheck": "tsc --noEmit",
     "smoke": "node scripts/smoke.mjs",
+    "test": "node --test scripts/*.test.mjs",
     "prepublishOnly": "npm run build"
   },
   "dependencies": {
