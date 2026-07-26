@@ -1,0 +1,20 @@
+# Smithery (smithery.ai) listing for the LexVibe MCP server.
+# Docs: https://smithery.ai/docs/config
+startCommand:
+  type: stdio
+  configSchema:
+    type: object
+    properties:
+      lexvibeAppId:
+        type: string
+        description: >-
+          Your LexVibe app id (optional). Used in the installed snippet and API
+          calls; without it, tools ask for the id explicitly and warn about the
+          placeholder.
+    required: []
+  commandFunction: |-
+    (config) => ({
+      command: "npx",
+      args: ["-y", "@lexvibe/mcp"],
+      env: config.lexvibeAppId ? { LEXVIBE_APP_ID: config.lexvibeAppId } : {}
+    })

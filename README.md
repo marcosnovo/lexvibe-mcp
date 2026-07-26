@@ -8,18 +8,18 @@ banner with real script blocking, and an EU AI Act risk check.
 
 ## Tools
 
-| Tool                | What it does                                                                                                                                                          |
-| ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `make_compliant`    | One step: scan → generate docs into `/legal` → install the banner snippet → classify EU AI Act risk.                                                                  |
-| `check_compliance`  | Read-only readiness report: what was detected, what could be auto-derived, and which human facts are still missing. Run it again after adding any SDK to catch drift. |
-| `scan_project`      | Detect analytics, payments, generative AI, email collection, third parties and platforms (web / iOS / Android).                                                       |
+| Tool                | What it does                                                                                                                                                           |
+| ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `make_compliant`    | One step: scan → generate docs into `/legal` → install the banner snippet → classify EU AI Act risk.                                                                   |
+| `check_compliance`  | Read-only readiness report: what was detected, what could be auto-derived, and which human facts are still missing. Run it again after adding any SDK to catch drift.  |
+| `scan_project`      | Detect analytics, payments, generative AI, email collection, third parties and platforms (web / iOS / Android).                                                        |
 | `check_website`     | Free, no-signup compliance check of a **deployed** site by URL: per-vendor signals, recommendations and EU AI Act applicability (the same public checker as `/check`). |
-| `verify_snippet`    | Fetch a deployed URL and confirm the cookie-banner snippet is actually live in the served HTML (`ok` / `missing` / `unknown`).                                        |
-| `generate_policies` | Generate privacy policy / terms / AI disclosure, localized and tailored per market.                                                                                   |
-| `install_snippet`   | Insert the cookie-banner snippet before `</head>`; for JSX layouts it returns exact instructions instead.                                                             |
-| `check_ai_act`      | Classify EU AI Act risk and list the applicable obligations with deadlines.                                                                                           |
-| `claim_app`         | Create a REAL app in the user's LexVibe account: returns a link the user opens to sign in and confirm (30 min).                                                       |
-| `get_claim_status`  | Poll a claim created with `claim_app`; once confirmed it returns the real app id, install snippet and policy URL.                                                     |
+| `verify_snippet`    | Fetch a deployed URL and confirm the cookie-banner snippet is actually live in the served HTML (`ok` / `missing` / `unknown`).                                         |
+| `generate_policies` | Generate privacy policy / terms / AI disclosure, localized and tailored per market.                                                                                    |
+| `install_snippet`   | Insert the cookie-banner snippet before `</head>`; for JSX layouts it returns exact instructions instead.                                                              |
+| `check_ai_act`      | Classify EU AI Act risk and list the applicable obligations with deadlines.                                                                                            |
+| `claim_app`         | Create a REAL app in the user's LexVibe account: returns a link the user opens to sign in and confirm (30 min).                                                        |
+| `get_claim_status`  | Poll a claim created with `claim_app`; once confirmed it returns the real app id, install snippet and policy URL.                                                      |
 
 ## Typical use (natural language)
 
@@ -140,13 +140,13 @@ Full per-platform setup guide: <https://golexvibe.com/docs/integrations>
 
 ## Configuration
 
-| Variable             | Default                        | Purpose                                                          |
-| -------------------- | ------------------------------ | ---------------------------------------------------------------- |
-| `LEXVIBE_APP_ID`     | `YOUR_APP_ID`                  | Your LexVibe app id (links the snippet to your hosted policies)  |
-| `LEXVIBE_API_URL`    | `https://golexvibe.com`        | LexVibe instance that generates documents and classifies AI risk |
-| `LEXVIBE_CDN_URL`    | `https://golexvibe.com`        | Host the widget script is served from (self-hosting only)        |
-| `LEXVIBE_EVENTS_URL` | LexVibe events endpoint        | Override where anonymous tool-usage events are sent (self-hosting) |
-| `LEXVIBE_TELEMETRY`  | `1`                            | Set to `0` / `false` / `off` to disable usage telemetry          |
+| Variable             | Default                 | Purpose                                                            |
+| -------------------- | ----------------------- | ------------------------------------------------------------------ |
+| `LEXVIBE_APP_ID`     | `YOUR_APP_ID`           | Your LexVibe app id (links the snippet to your hosted policies)    |
+| `LEXVIBE_API_URL`    | `https://golexvibe.com` | LexVibe instance that generates documents and classifies AI risk   |
+| `LEXVIBE_CDN_URL`    | `https://golexvibe.com` | Host the widget script is served from (self-hosting only)          |
+| `LEXVIBE_EVENTS_URL` | LexVibe events endpoint | Override where anonymous tool-usage events are sent (self-hosting) |
+| `LEXVIBE_TELEMETRY`  | `1`                     | Set to `0` / `false` / `off` to disable usage telemetry            |
 
 ## Usage analytics
 

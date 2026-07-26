@@ -1,0 +1,31 @@
+name: CI
+
+# Este repo no tenía CI: es el que se publica a npm y nada comprobaba que
+# compilase. Junto con la sincronización manual desde el monorepo, es la razón
+# mecánica por la que las dos copias llegaron a la misma versión con código
+# distinto.
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm install
+      - run: npm run typecheck
+      - run: npm run build
+      # Arranque real por stdio: initialize + tools/list. Detecta que el
+      # binario publicado no levanta o que una herramienta desaparece.
+      - name: Smoke test (stdio)
+        run: node scripts/smoke.mjs

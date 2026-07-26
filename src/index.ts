@@ -4,9 +4,14 @@ import { join } from "node:path";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
-import { trackToolCall } from "./analytics.js";
-import { deriveDefaults, scanProject } from "./detect.js";
-import { readCapped, safeFetch } from "./ssrf.js";
+
+// Extensión .ts explícita + `rewriteRelativeImportExtensions` en tsconfig: así
+// `npm run dev` (node --experimental-strip-types) resuelve el módulo tal cual
+// y `tsc` lo reescribe a .js en dist/ (antes el specifier ./detect.js no
+// existía en src/ y el modo dev arrancaba roto).
+import { deriveDefaults, scanProject } from "./detect.ts";
+import { trackToolCall } from "./analytics.ts";
+import { readCapped, safeFetch } from "./ssrf.ts";
 
 /** Datos humanos que el código no puede saber con certeza. */
 const HUMAN_FACTS: { id: string; hint: string }[] = [
@@ -52,10 +57,6 @@ function buildAgentPrompt(missing: { id: string; hint: string }[], appName: stri
  *   - make_compliant: todo en un paso (scan + docs + snippet + AI Act).
  *   - scan_project: detecta qué usa el proyecto (analítica, pagos, IA, terceros).
  *   - check_compliance: informe de preparación (solo lectura) + agentPrompt.
- *   - check_website: checker público de una web DESPLEGADA (mismo /api/check
- *     que la página /check de la plataforma; gratis, sin registro).
- *   - verify_snippet: comprueba que el banner está VIVO en el sitio desplegado
- *     (mismo criterio que /api/verify: marcador del snippet en el HTML servido).
  *   - generate_policies: genera privacidad/términos/aviso IA (multi-jurisdicción).
  *   - install_snippet: inserta el snippet del banner en el HTML/layout.
  *   - check_ai_act: clasifica el riesgo según el EU AI Act.
@@ -110,13 +111,23 @@ interface SnippetOptions {
   lang?: string;
 }
 
-/** Atributos del snippet — misma forma que buildSnippet() en apps/web/src/lib/snippet.ts. */
+/**
+ * Atributos del snippet — MISMA forma y MISMO orden que `buildSnippet()` en
+ * apps/web/src/lib/snippet.ts. Si divergen, el usuario recibe un snippet
+ * distinto según por dónde entre (panel vs agente), que es exactamente el
+ * problema que este producto vende resuelto.
+ *
+ * `data-policy` es obligatorio: sin él el banner solo tiene el enlace a la
+ * política si la config remota responde, y una config caída (o una app aún sin
+ * reclamar) deja el aviso de cookies sin enlace legal.
+ */
 function snippetAttrs(id: string, opts: SnippetOptions): string {
   return [
     `src="${CDN}/v1/lexvibe-widget.js"`,
     `${SNIPPET_MARKER}="${id}"`,
     `data-config="${API}/api/widget-config/${id}"`,
     `data-ingest="${API}/api/consent"`,
+    `data-policy="${API}/p/${id}/privacy"`,
     opts.accent ? `data-accent="${opts.accent}"` : null,
     opts.position ? `data-position="${opts.position}"` : null,
     opts.lang ? `data-lang="${opts.lang}"` : null,
@@ -136,11 +147,17 @@ function buildJsxSnippet(id: string, opts: SnippetOptions = {}): string {
   return `<script ${snippetAttrs(id, opts)} />`;
 }
 
+/** Normaliza un dominio/URL a URL absoluta https — igual que /api/check y /api/verify. */
+function normalizeUrl(domain: string): string {
+  const trimmed = domain.trim().replace(/\/+$/, "");
+  return /^https?:\/\//.test(trimmed) ? trimmed : `https://${trimmed}`;
+}
+
 const server = new McpServer(
-  { name: "lexvibe", version: "0.1.7" },
+  { name: "lexvibe", version: "0.1.8" },
   {
     instructions:
-      "LexVibe makes vibe-coded apps (Lovable, Bolt, v0, Next.js, plain HTML) legally compliant: GDPR privacy policy, terms of service, cookie consent banner with real script blocking, and EU AI Act risk classification. When the user asks to make their app legally compliant, GDPR-ready, or to add a privacy policy / terms / cookie banner, call make_compliant first (one step). Use check_compliance for a read-only readiness report, scan_project to detect data processing, check_website for a free no-signup compliance check of a DEPLOYED site by URL, generate_policies for documents only, install_snippet to add the cookie banner to a specific file, check_ai_act to classify EU AI Act risk, and verify_snippet after deploying to confirm the cookie banner is actually live on the site. If no real LexVibe app id is configured (LEXVIBE_APP_ID missing or a placeholder), call claim_app to get a link the user opens to create a real app in their account, then poll get_claim_status for the real app id and snippet. Legal documents describe the app as it was when they were generated: after adding any SDK, analytics, payments, auth or AI integration, run check_compliance again and regenerate the documents if it reports processing they don't cover yet.",
+      "LexVibe makes vibe-coded apps (Lovable, Bolt, v0, Next.js, plain HTML) legally compliant: GDPR privacy policy, terms of service, cookie consent banner with real script blocking, and EU AI Act risk classification. When the user asks to make their app legally compliant, GDPR-ready, or to add a privacy policy / terms / cookie banner, call make_compliant first (one step). Use check_compliance for a read-only readiness report, scan_project to detect data processing, generate_policies for documents only, install_snippet to add the cookie banner to a specific file, and check_ai_act to classify EU AI Act risk. If no real LexVibe app id is configured (LEXVIBE_APP_ID missing or a placeholder), call claim_app to get a link the user opens to create a real app in their account, then poll get_claim_status for the real app id and snippet. Legal documents describe the app as it was when they were generated: after adding any SDK, analytics, payments, auth or AI integration, run check_compliance again and regenerate the documents if it reports processing they don't cover yet.",
   },
 );
 
@@ -155,6 +172,11 @@ function text(value: unknown) {
   };
 }
 
+/** Fallo de herramienta con `isError` (igual que el MCP remoto): sin él, el agente ve el error como un resultado normal. */
+function toolError(message: string) {
+  return { ...text({ error: message }), isError: true as const };
+}
+
 server.tool(
   "scan_project",
   "Read-only scan of a local project (dependencies + source code + mobile manifests). Detects data processing relevant to legal compliance — analytics, payments, generative AI (distinguishing user-facing AI from server-side-only AI), email collection, third-party sharing — plus structured `facts` (auth methods, payments channel, AI flags, tracking/IDFA, device permissions), the `locales` the app supports and the product platforms (web / iOS / Android). Pass suggestedAnswers to generate_policies, and pass `facts`, `locales` and `signals` to claim_app so the generated documents are anchored in evidence.",
@@ -165,7 +187,7 @@ server.tool(
     try {
       return text(scanProject(dir));
     } catch (err) {
-      return text({ error: `Scan failed: ${(err as Error).message}` });
+      return toolError(`Scan failed: ${(err as Error).message}`);
     }
   },
 );
@@ -176,6 +198,35 @@ server.tool(
   {
     dir: z.string().describe("Project root path."),
     appName: z.string().optional().describe("Override the auto-derived app name."),
+    entity: z
+      .string()
+      .optional()
+      .describe("Data controller / legal entity, if already known (overrides the derived one)."),
+    contactEmail: z
+      .string()
+      .optional()
+      .describe("Privacy contact email, if already known (overrides the derived one)."),
+    markets: z
+      .array(
+        z.enum([
+          "eu",
+          "uk",
+          "ch",
+          "us",
+          "ca",
+          "latam",
+          "apac",
+          "india",
+          "china",
+          "mena",
+          "africa",
+          "global",
+        ]),
+      )
+      .optional()
+      .describe(
+        "Regions where the app has users. Without them `ready` can never be true (markets are a required human fact).",
+      ),
   },
   {
     title: "Check compliance readiness",
@@ -183,7 +234,7 @@ server.tool(
     destructiveHint: false,
     openWorldHint: false,
   },
-  async ({ dir, appName }) => {
+  async ({ dir, appName, entity, contactEmail, markets }) => {
     trackToolCall("check_compliance");
     try {
       const scan = scanProject(dir);
@@ -195,6 +246,9 @@ server.tool(
         ...(derived.companyEntity ? { companyEntity: derived.companyEntity } : {}),
         ...(derived.contactEmail ? { contactEmail: derived.contactEmail } : {}),
         ...(appName ? { appName } : {}),
+        ...(entity ? { companyEntity: entity } : {}),
+        ...(contactEmail ? { contactEmail } : {}),
+        ...(markets && markets.length > 0 ? { markets } : {}),
       };
       const missing = missingFacts(answers);
       return text({
@@ -220,7 +274,7 @@ server.tool(
         agentPrompt: buildAgentPrompt(missing, (answers.appName as string) ?? "this product"),
       });
     } catch (err) {
-      return text({ error: `Check failed: ${(err as Error).message}` });
+      return toolError(`Check failed: ${(err as Error).message}`);
     }
   },
 );
@@ -284,7 +338,7 @@ server.tool(
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });
-      if (!res.ok) return text({ error: `API ${res.status}` });
+      if (!res.ok) return toolError(`API ${res.status}`);
       const data = (await res.json()) as {
         documents?: { docType: string; locale: string; content: string; source?: string }[];
       };
@@ -295,7 +349,7 @@ server.tool(
         ...(hasTemplateDocs(data.documents) ? { note: TEMPLATE_NOTE } : {}),
       });
     } catch (err) {
-      return text({ error: `Could not generate: ${(err as Error).message}` });
+      return toolError(`Could not generate: ${(err as Error).message}`);
     }
   },
 );
@@ -306,15 +360,12 @@ server.tool(
   {
     file: z.string().describe("File to install into (index.html, app/layout.tsx…)."),
     appId: z.string().optional().describe("App id (defaults to LEXVIBE_APP_ID)."),
-    accent: z.string().optional().describe("Accent color for the banner (CSS color)."),
+    accent: z.string().optional(),
     position: z
       .enum(["bottom", "bottom-left", "bottom-right"])
       .optional()
-      .describe("Banner position on the page."),
-    lang: z
-      .string()
-      .optional()
-      .describe("Force the banner language (ISO 639-1); defaults to auto-detect."),
+      .describe("Where the banner sits on screen."),
+    lang: z.string().optional().describe("Force the banner language (default: the page's)."),
   },
   {
     title: "Install cookie-banner snippet",
@@ -367,7 +418,7 @@ server.tool(
           : {}),
       });
     } catch (err) {
-      return text({ error: `Could not install: ${(err as Error).message}` });
+      return toolError(`Could not install: ${(err as Error).message}`);
     }
   },
 );
@@ -398,19 +449,13 @@ server.tool(
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(answers),
       });
-      if (!res.ok) return text({ error: `API ${res.status}` });
+      if (!res.ok) return toolError(`API ${res.status}`);
       return text(await res.json());
     } catch (err) {
-      return text({ error: `Could not classify: ${(err as Error).message}` });
+      return toolError(`Could not classify: ${(err as Error).message}`);
     }
   },
 );
-
-/** Normaliza un dominio/URL a URL absoluta https — igual que /api/check y /api/verify. */
-function normalizeUrl(domain: string): string {
-  const trimmed = domain.trim().replace(/\/+$/, "");
-  return /^https?:\/\//.test(trimmed) ? trimmed : `https://${trimmed}`;
-}
 
 server.tool(
   "check_website",
@@ -435,9 +480,9 @@ server.tool(
         body: JSON.stringify({ url }),
       });
       if (res.status === 429) {
-        return text({ error: "Rate limited — wait a minute and try again." });
+        return toolError("Rate limited — wait a minute and try again.");
       }
-      if (!res.ok) return text({ error: `API ${res.status}` });
+      if (!res.ok) return toolError(`API ${res.status}`);
       const data = (await res.json()) as {
         url: string;
         signals: { signal: string; vendors: string[] }[];
@@ -452,7 +497,7 @@ server.tool(
           "If any signal above (analytics, marketing pixels, payments, generative AI, email capture, third parties) is not disclosed by the site's current legal documents, they are out of date: re-run generate_policies (or make_compliant) so they cover it.",
       });
     } catch (err) {
-      return text({ error: `Could not check the website: ${(err as Error).message}` });
+      return toolError(`Could not check the website: ${(err as Error).message}`);
     }
   },
 );
@@ -521,6 +566,14 @@ server.tool(
       .describe(
         "App / business name. If omitted, it's derived from the repo (package.json / LICENSE).",
       ),
+    entity: z
+      .string()
+      .optional()
+      .describe("Data controller / legal entity, if already known (overrides the derived one)."),
+    contactEmail: z
+      .string()
+      .optional()
+      .describe("Privacy contact email, if already known (overrides the derived one)."),
     appId: z.string().optional().describe("LexVibe app id (defaults to LEXVIBE_APP_ID)."),
     markets: z
       .array(
@@ -540,15 +593,12 @@ server.tool(
         ]),
       )
       .default(["eu"]),
-    accent: z.string().optional().describe("Accent color for the banner (CSS color)."),
+    accent: z.string().optional(),
     position: z
       .enum(["bottom", "bottom-left", "bottom-right"])
       .optional()
-      .describe("Banner position on the page."),
-    lang: z
-      .string()
-      .optional()
-      .describe("Force the banner language (ISO 639-1); defaults to auto-detect."),
+      .describe("Where the banner sits on screen."),
+    lang: z.string().optional().describe("Force the banner language (default: the page's)."),
   },
   {
     title: "Make app compliant (one step)",
@@ -556,9 +606,10 @@ server.tool(
     destructiveHint: false,
     openWorldHint: true,
   },
-  async ({ dir, appName, appId, markets, accent, position, lang }) => {
+  async ({ dir, appName, entity, contactEmail, appId, markets, accent, position, lang }) => {
     trackToolCall("make_compliant");
     const id = appId ?? APP_ID;
+    const opts = { accent, position, lang };
     const steps: string[] = [];
     const written: string[] = [];
     // Origen real por documento (ai/plantilla), para que el agente sepa si los
@@ -586,10 +637,20 @@ server.tool(
       const derivedKeys = Object.keys(derived).filter((k) => derived[k as keyof typeof derived]);
       if (derivedKeys.length > 0) steps.push(`Derived from repo: ${derivedKeys.join(", ")}.`);
     } catch (err) {
-      steps.push(`Scan failed: ${(err as Error).message}`);
+      // Dir inexistente o que no parece un proyecto (assertProjectDir): abortar
+      // ANTES de escribir nada. Seguir adelante creaba la ruta fantasma con
+      // mkdirSync recursive, escribía los docs allí y reportaba éxito.
+      return toolError(
+        `Scan failed: ${(err as Error).message}. Pass the ABSOLUTE path of the project root as \`dir\` and re-run. No files or directories were created.`,
+      );
     }
     // El appName explícito manda; si no, se queda el deducido del repo (o falta).
     if (appName) answers.appName = appName;
+    // entity/contactEmail explícitos (mismo patrón que check_compliance): sin
+    // ellos, el bucle "responde el agentPrompt y re-ejecuta" no tenía por dónde
+    // entregar companyEntity/contactEmail y era un callejón sin salida.
+    if (entity) answers.companyEntity = entity;
+    if (contactEmail) answers.contactEmail = contactEmail;
     // markets llega como argumento (con default), así que ya está provisto.
     answers.markets = markets;
     const resolvedName = (answers.appName as string | undefined) ?? "this product";
@@ -636,8 +697,7 @@ server.tool(
     // 3) Instalar el snippet del banner de cookies. Solo aplica a web: una app
     // nativa no tiene <head> ni cookies del navegador (su consentimiento se
     // gestiona con manifiestos de la tienda y, si acaso, un SDK de consentimiento).
-    const snippetOpts = { accent, position, lang };
-    const snippet = buildSnippet(id, snippetOpts);
+    const snippet = buildSnippet(id, opts);
     if (isWeb) {
       const candidates = [
         "app/layout.tsx",
@@ -669,7 +729,7 @@ server.tool(
       steps.push(
         installedIn
           ? `Snippet installed in ${installedIn}.`
-          : `No file with a literal </head> was found, so nothing was modified (writing raw HTML into a JSX/TSX layout would break it). Add the snippet manually — plain HTML, before </head>:\n${snippet}\nOr, in a Next.js App Router layout (app/layout.tsx), add a <head> element inside <html> containing:\n${buildJsxSnippet(id, snippetOpts)}`,
+          : `No file with a literal </head> was found, so nothing was modified (writing raw HTML into a JSX/TSX layout would break it). Add the snippet manually — plain HTML, before </head>:\n${snippet}\nOr, in a Next.js App Router layout (app/layout.tsx), add a <head> element inside <html> containing:\n${buildJsxSnippet(id, opts)}`,
       );
     } else {
       steps.push(
@@ -712,7 +772,7 @@ server.tool(
       nextSteps: [
         ...(missing.length > 0
           ? [
-              `Missing human facts the code can't know: ${missing.map((m) => m.id).join(", ")}. Answer them (see agentPrompt) and re-run for complete documents.`,
+              `Missing human facts the code can't know: ${missing.map((m) => m.id).join(", ")}. Answer them (see agentPrompt) and re-run make_compliant passing appName / entity / contactEmail / markets for complete documents.`,
             ]
           : []),
         `Publish and auto-update your documents (and persist them) at ${API}/dashboard/activate.`,
@@ -722,11 +782,6 @@ server.tool(
             ]
           : []),
         "Review the drafts in /legal and fill in any bracketed placeholder fields (e.g. [complete: …]).",
-        ...(isWeb
-          ? [
-              "After deploying, run verify_snippet with the site's public URL to confirm the cookie banner is actually live.",
-            ]
-          : []),
         ...(isMobile
           ? [
               "Add the hosted Privacy Policy URL to the App Store Connect / Google Play Console listing.",
@@ -801,7 +856,7 @@ server.tool(
   async ({ url, appName, markets, answers, facts, locales, signals }) => {
     trackToolCall("claim_app");
     if (!url && !appName) {
-      return text({ error: "Provide at least `url` or `appName` to create the claim." });
+      return toolError("Provide at least `url` or `appName` to create the claim.");
     }
     // Preserve the platform for mobile-only apps (no store URL yet): without
     // it the claim would be treated as web and deliver a cookie-banner
@@ -819,7 +874,7 @@ server.tool(
       });
       if (!res.ok) {
         const err = (await res.json().catch(() => null)) as { error?: string } | null;
-        return text({ error: err?.error ?? `API ${res.status}` });
+        return toolError(err?.error ?? `API ${res.status}`);
       }
       const data = (await res.json()) as {
         claimUrl: string;
@@ -832,7 +887,7 @@ server.tool(
           "Show this link to the user and ask them to open it, sign in and confirm — that creates the app in THEIR LexVibe account. After they confirm, call get_claim_status with this code to retrieve the real app id and snippet, then replace any placeholder (YOUR_APP_ID) snippet you installed.",
       });
     } catch (err) {
-      return text({ error: `Could not create the claim: ${(err as Error).message}` });
+      return toolError(`Could not create the claim: ${(err as Error).message}`);
     }
   },
 );
@@ -852,11 +907,11 @@ server.tool(
     try {
       const res = await fetch(`${API}/api/claim/${encodeURIComponent(code)}`);
       if (res.status === 404) {
-        return text({ error: "Unknown claim code. Create a new claim with claim_app." });
+        return toolError("Unknown claim code. Create a new claim with claim_app.");
       }
       if (!res.ok) {
         const err = (await res.json().catch(() => null)) as { error?: string } | null;
-        return text({ error: err?.error ?? `API ${res.status}` });
+        return toolError(err?.error ?? `API ${res.status}`);
       }
       const data = (await res.json()) as {
         status: "pending" | "expired" | "claimed";
@@ -864,6 +919,13 @@ server.tool(
         snippet?: string | null;
         policyUrl?: string;
         pending?: string[];
+        /**
+         * ¿Sirve ya `policyUrl` los documentos? Con el muro de pago pueden
+         * quedarse en borrador, y entonces la página pública responde "aún no
+         * disponible". Ausente ⇒ API antigua: se asume publicado, que es el
+         * comportamiento de siempre y nunca inventa un muro que no existe.
+         */
+        published?: boolean;
       };
       if (data.status === "claimed") {
         // Datos que el humano debe COMPLETAR (draft-first): el código no puede
@@ -876,11 +938,19 @@ server.tool(
           reviewItems.length > 0
             ? ` Before the documents can be published, the user still needs to provide: ${reviewItems.join("; ")}. Ask them for these and complete them in the LexVibe document editor (they are marked as [to complete] in the documents).`
             : "";
+        // Instalar el snippet de una app cuyos documentos siguen en borrador
+        // deja el sitio del usuario enlazando una política que no carga: peor
+        // que no haber instalado nada, y lo descubre un visitante (o el
+        // revisor de una tienda), no él. Mientras no esté publicado, el agente
+        // NO debe instalar ni decir que ya cumple.
+        const live = data.published !== false;
         return text({
           ...data,
-          instructions:
-            "The app is claimed. Use this real app id from now on: replace any placeholder (YOUR_APP_ID) snippet with the snippet above (install_snippet accepts an appId argument), and use policyUrl as the privacy-policy link. Suggest the user sets LEXVIBE_APP_ID to this id in their MCP config." +
-            reviewNote,
+          instructions: live
+            ? "The app is claimed and its documents are live. Use this real app id from now on: replace any placeholder (YOUR_APP_ID) snippet with the snippet above (install_snippet accepts an appId argument), and use policyUrl as the privacy-policy link. Suggest the user sets LEXVIBE_APP_ID to this id in their MCP config." +
+              reviewNote
+            : "The app is claimed BUT its documents are NOT published yet: policyUrl will not serve them until the owner activates hosting from the LexVibe dashboard. Do NOT install the snippet yet and do NOT tell the user they are compliant — installing now would leave a dead legal link on their site. Tell them to publish from their dashboard, then call get_claim_status again." +
+              reviewNote,
         });
       }
       if (data.status === "expired") {
@@ -895,7 +965,7 @@ server.tool(
           "The user hasn't confirmed yet. Remind them to open the claim link, then call get_claim_status again in a few seconds.",
       });
     } catch (err) {
-      return text({ error: `Could not check the claim: ${(err as Error).message}` });
+      return toolError(`Could not check the claim: ${(err as Error).message}`);
     }
   },
 );

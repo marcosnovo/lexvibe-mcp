@@ -132,8 +132,7 @@ async function assertPublicUrl(rawUrl: string): Promise<Validated> {
   const addrs = await lookup(host, { all: true });
   if (addrs.length === 0) throw new Error("Could not resolve the host");
   for (const a of addrs) {
-    if (isPrivateIp(a.address))
-      throw new Error("Target not allowed (private or reserved address)");
+    if (isPrivateIp(a.address)) throw new Error("Target not allowed (private or reserved address)");
   }
   const ipv4 = addrs.find((a) => a.family === 4)?.address ?? null;
   return { url, ipv4 };
