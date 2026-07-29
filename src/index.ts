@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
@@ -10,6 +10,7 @@ import { z } from "zod";
 // y `tsc` lo reescribe a .js en dist/ (antes el specifier ./detect.js no
 // existía en src/ y el modo dev arrancaba roto).
 import { deriveDefaults, scanProject } from "./detect.ts";
+import { extractTheme } from "./theme.ts";
 import { trackToolCall } from "./analytics.ts";
 import { readCapped, safeFetch } from "./ssrf.ts";
 
@@ -109,6 +110,10 @@ interface SnippetOptions {
   accent?: string;
   position?: string;
   lang?: string;
+  /** Tokens de aspecto extraídos de la app destino (`c:#6366f1;bg:#fff`). */
+  tokens?: string;
+  /** Variante de esos tokens para el modo oscuro del anfitrión. */
+  tokensDark?: string;
 }
 
 /**
@@ -121,16 +126,100 @@ interface SnippetOptions {
  * política si la config remota responde, y una config caída (o una app aún sin
  * reclamar) deja el aviso de cookies sin enlace legal.
  */
+/**
+ * Escapa un valor que va dentro de un atributo HTML entrecomillado.
+ *
+ * Segunda barrera: `normalise()` ya solo deja pasar formas exactas, pero este
+ * snippet se ESCRIBE en un fichero del usuario, así que un solo `"` que se
+ * colase cerraría el atributo y convertiría el resto en marcado ejecutable.
+ */
+function attr(value: string): string {
+  return value.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
+}
+
+/**
+ * Forma admisible de un id de app. Igual que el MCP remoto
+ * (apps/web/src/app/api/mcp/route.ts). El id llega de la API —
+ * `get_claim_status` lo devuelve tal cual y el agente lo pasa a
+ * `install_snippet`—, así que una API hostil no puede convertirlo en marcado.
+ */
+const APP_ID_RE = /^[A-Za-z0-9_-]{1,80}$/;
+
+/**
+ * Los 12 idiomas del producto — la MISMA lista que el enum de
+ * `generate_policies` más abajo, que `LANGS` en el widget
+ * (packages/cookie-widget/src/i18n.ts) y que el enum `app_locale` en SQL.
+ * `data-lang` no admite nada más: el widget rechaza lo que no reconoce.
+ */
+const LANGS = ["es", "en", "fr", "de", "it", "pt", "nl", "ja", "zh", "ko", "hi", "ar"] as const;
+
+/** Posiciones que entiende el widget. */
+const POSITIONS = ["bottom", "bottom-left", "bottom-right"] as const;
+
+/**
+ * Formas admisibles de los nombres de fichero que la API nos dice que
+ * escribamos en el proyecto del usuario. Ver el filtro en `make_compliant`.
+ */
+const DOC_TYPE_RE = /^[a-z][a-z0-9_-]{0,30}$/;
+const LOCALE_RE = /^[a-z]{2}(-[A-Za-z0-9]{2,8})?$/;
+
+/**
+ * `fetch` contra NUESTRA API con presupuesto de tiempo y tope de cuerpo.
+ *
+ * No usa `safeFetch`: `API` la elige el propio usuario por entorno, y el
+ * self-hosting legítimo apunta a localhost, que `assertPublicUrl` rechazaría.
+ * Lo que sí hace falta es que este proceso —que corre en la máquina del
+ * usuario, dentro de su sesión de agente— no se quede colgado para siempre ni
+ * se coma la RAM si al otro lado hay un servidor lento u hostil.
+ */
+async function apiFetch(url: string, init?: RequestInit, timeoutMs = 20_000): Promise<Response> {
+  // AbortSignal.timeout no existe en Node <17.3 ni Safari <15.4.
+  const signal =
+    typeof AbortSignal !== "undefined" && typeof AbortSignal.timeout === "function"
+      ? AbortSignal.timeout(timeoutMs)
+      : undefined;
+  return fetch(url, { ...init, signal });
+}
+
+/** `res.json()` con tope de bytes — mismo motivo que `apiFetch`. */
+async function apiJson<T>(res: Response, maxBytes = 2_000_000): Promise<T> {
+  return JSON.parse(await readCapped(res, maxBytes)) as T;
+}
+
+/**
+ * Id de app utilizable, o el placeholder si no tiene la forma esperada.
+ *
+ * Se normaliza UNA vez, al entrar en el handler, y no dentro del emisor del
+ * snippet: si el emisor cayera al placeholder por su cuenta, el handler seguiría
+ * creyendo que instaló el id bueno y NO emitiría el aviso de "estás con
+ * YOUR_APP_ID" — le diría al agente que las políticas hospedadas y la prueba de
+ * consentimiento quedaron enlazadas cuando no lo están.
+ */
+function resolveAppId(appId: string | undefined): string {
+  const id = appId ?? APP_ID;
+  return APP_ID_RE.test(id) ? id : "YOUR_APP_ID";
+}
+
 function snippetAttrs(id: string, opts: SnippetOptions): string {
+  // Segunda barrera: los handlers ya normalizan con `resolveAppId`, pero este
+  // emisor escribe en ficheros del usuario y no debe fiarse del llamante.
+  const safeId = APP_ID_RE.test(id) ? id : "YOUR_APP_ID";
+  const lang = opts.lang && (LANGS as readonly string[]).includes(opts.lang) ? opts.lang : null;
+  const position =
+    opts.position && (POSITIONS as readonly string[]).includes(opts.position)
+      ? opts.position
+      : null;
   return [
     `src="${CDN}/v1/lexvibe-widget.js"`,
-    `${SNIPPET_MARKER}="${id}"`,
-    `data-config="${API}/api/widget-config/${id}"`,
+    `${SNIPPET_MARKER}="${safeId}"`,
+    `data-config="${API}/api/widget-config/${safeId}"`,
     `data-ingest="${API}/api/consent"`,
-    `data-policy="${API}/p/${id}/privacy"`,
-    opts.accent ? `data-accent="${opts.accent}"` : null,
-    opts.position ? `data-position="${opts.position}"` : null,
-    opts.lang ? `data-lang="${opts.lang}"` : null,
+    `data-policy="${API}/p/${safeId}/privacy"`,
+    opts.accent ? `data-accent="${attr(opts.accent)}"` : null,
+    opts.tokens ? `data-tokens="${attr(opts.tokens)}"` : null,
+    opts.tokensDark ? `data-tokens-dark="${attr(opts.tokensDark)}"` : null,
+    position ? `data-position="${position}"` : null,
+    lang ? `data-lang="${lang}"` : null,
     "defer",
   ]
     .filter(Boolean)
@@ -147,6 +236,27 @@ function buildJsxSnippet(id: string, opts: SnippetOptions = {}): string {
   return `<script ${snippetAttrs(id, opts)} />`;
 }
 
+/**
+ * Raíz del proyecto para la extracción de tema: sube desde el fichero de
+ * instalación hasta encontrar un `package.json`, con el directorio del propio
+ * fichero de respaldo si no hay ninguno (sitio estático suelto).
+ */
+function projectRoot(file: string): string {
+  const own = dirname(resolve(file));
+  let dir = own;
+  for (let i = 0; i < 6; i++) {
+    if (existsSync(join(dir, "package.json"))) return dir;
+    const parent = dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  // Sin `package.json` (sitio estático suelto) el respaldo es el directorio
+  // del propio fichero, NO `process.cwd()`: si el MCP se lanzó desde otro
+  // sitio, el cwd no tiene nada que ver con la web que se está instalando y
+  // perderíamos su index.html, su manifest y su CSS.
+  return own;
+}
+
 /** Normaliza un dominio/URL a URL absoluta https — igual que /api/check y /api/verify. */
 function normalizeUrl(domain: string): string {
   const trimmed = domain.trim().replace(/\/+$/, "");
@@ -154,7 +264,7 @@ function normalizeUrl(domain: string): string {
 }
 
 const server = new McpServer(
-  { name: "lexvibe", version: "0.1.8" },
+  { name: "lexvibe", version: "0.1.9" },
   {
     instructions:
       "LexVibe makes vibe-coded apps (Lovable, Bolt, v0, Next.js, plain HTML) legally compliant: GDPR privacy policy, terms of service, cookie consent banner with real script blocking, and EU AI Act risk classification. When the user asks to make their app legally compliant, GDPR-ready, or to add a privacy policy / terms / cookie banner, call make_compliant first (one step). Use check_compliance for a read-only readiness report, scan_project to detect data processing, generate_policies for documents only, install_snippet to add the cookie banner to a specific file, and check_ai_act to classify EU AI Act risk. If no real LexVibe app id is configured (LEXVIBE_APP_ID missing or a placeholder), call claim_app to get a link the user opens to create a real app in their account, then poll get_claim_status for the real app id and snippet. Legal documents describe the app as it was when they were generated: after adding any SDK, analytics, payments, auth or AI integration, run check_compliance again and regenerate the documents if it reports processing they don't cover yet.",
@@ -333,15 +443,15 @@ server.tool(
       locales,
     };
     try {
-      const res = await fetch(`${API}/api/generate`, {
+      const res = await apiFetch(`${API}/api/generate`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });
       if (!res.ok) return toolError(`API ${res.status}`);
-      const data = (await res.json()) as {
+      const data = await apiJson<{
         documents?: { docType: string; locale: string; content: string; source?: string }[];
-      };
+      }>(res);
       // Expone el origen real (ai/plantilla): el agente debe poder avisar de
       // que un documento de plantilla aún no está personalizado para la app.
       return text({
@@ -359,13 +469,19 @@ server.tool(
   "Insert the LexVibe cookie-banner + hosted-policies snippet into an HTML file, right before </head>. If the file has no literal </head> (e.g. a Next.js App Router layout.tsx), it does NOT modify the file: it returns the snippet plus exact instructions for you (the dev agent) to add it as JSX. Never corrupts user files.",
   {
     file: z.string().describe("File to install into (index.html, app/layout.tsx…)."),
-    appId: z.string().optional().describe("App id (defaults to LEXVIBE_APP_ID)."),
+    appId: z.string().regex(APP_ID_RE).optional().describe("App id (defaults to LEXVIBE_APP_ID)."),
     accent: z.string().optional(),
     position: z
       .enum(["bottom", "bottom-left", "bottom-right"])
       .optional()
       .describe("Where the banner sits on screen."),
     lang: z.string().optional().describe("Force the banner language (default: the page's)."),
+    theme: z
+      .enum(["auto", "off"])
+      .optional()
+      .describe(
+        "auto (default): match the banner to this app's colors, fonts and radius. off: LexVibe default look.",
+      ),
   },
   {
     title: "Install cookie-banner snippet",
@@ -374,11 +490,36 @@ server.tool(
     idempotentHint: true,
     openWorldHint: false,
   },
-  async ({ file, appId, accent, position, lang }) => {
+  async ({ file, appId, accent, position, lang, theme }) => {
     trackToolCall("install_snippet");
-    const id = appId ?? APP_ID;
-    const opts = { accent, position, lang };
+    const id = resolveAppId(appId);
+    // El banner sale con el aspecto de la app destino salvo que se pida lo
+    // contrario. Es la diferencia entre pegar el snippet y que quede como si
+    // lo hubieras diseñado tú, o tener que pedirle luego a tu IA que lo
+    // adapte a mano. Un acento explícito manda sobre lo detectado.
+    // La raíz del proyecto, NO el directorio del fichero: CSS_CANDIDATES son
+    // rutas relativas a la raíz (`src/app/globals.css`…). Con
+    // `dirname(app/layout.tsx)` se buscaba `src/app/src/app/globals.css`, así
+    // que la detección devolvía null SIEMPRE en Next.js — justo la ruta que el
+    // propio tool documenta en su fallback JSX.
+    const detected = theme === "off" ? null : extractTheme(projectRoot(file));
+    const opts = {
+      accent,
+      position,
+      lang,
+      tokens: detected?.tokens,
+      tokensDark: detected?.tokensDark,
+    };
     const snippet = buildSnippet(id, opts);
+    const themeNote = detected
+      ? `\n\nBanner matched to your app (from ${detected.source}):\n` +
+        `  ${detected.tokens.replace(/--lv-/g, "").split(";").join("\n  ")}\n` +
+        (detected.font ? `  font: ${detected.font} (inherited)\n` : "") +
+        (detected.dark === "class" ? "  dark mode: follows your .dark class automatically\n" : "") +
+        "Override any of it at " +
+        `${API}/dashboard/cookies`
+      : "\n\nNo design tokens found, so the banner uses the LexVibe default. " +
+        `Style it at ${API}/dashboard/cookies`;
     try {
       let content = readFileSync(file, "utf8");
       if (content.includes("lexvibe-widget.js")) {
@@ -391,7 +532,8 @@ server.tool(
           `Snippet installed in ${file} (inserted before </head>).` +
             (id === "YOUR_APP_ID"
               ? " Warning: the placeholder app id YOUR_APP_ID was used — call claim_app to create a real app in the user's LexVibe account, then re-run install_snippet with the real appId (or set LEXVIBE_APP_ID)."
-              : ""),
+              : "") +
+            themeNote,
         );
       }
       // Sin </head> literal: escribir HTML crudo corrompería un módulo JSX/TSX
@@ -403,6 +545,7 @@ server.tool(
         reason:
           "No literal </head> tag found in this file, so it was NOT modified (prepending raw HTML would break a JS/TS module).",
         snippet,
+        theme: themeNote.trim(),
         instructions: [
           "Add the snippet manually. For a Next.js App Router root layout (app/layout.tsx), add a <head> element inside <html> in the returned JSX and place this self-closing script inside it:",
           `<head>\n  ${buildJsxSnippet(id, opts)}\n</head>`,
@@ -448,13 +591,13 @@ server.tool(
   async (answers) => {
     trackToolCall("check_ai_act");
     try {
-      const res = await fetch(`${API}/api/ai-act/classify`, {
+      const res = await apiFetch(`${API}/api/ai-act/classify`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(answers),
       });
       if (!res.ok) return toolError(`API ${res.status}`);
-      return text(await res.json());
+      return text(await apiJson(res));
     } catch (err) {
       return toolError(`Could not classify: ${(err as Error).message}`);
     }
@@ -478,7 +621,7 @@ server.tool(
   async ({ url }) => {
     trackToolCall("check_website");
     try {
-      const res = await fetch(`${API}/api/check`, {
+      const res = await apiFetch(`${API}/api/check`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ url }),
@@ -487,12 +630,12 @@ server.tool(
         return toolError("Rate limited — wait a minute and try again.");
       }
       if (!res.ok) return toolError(`API ${res.status}`);
-      const data = (await res.json()) as {
+      const data = await apiJson<{
         url: string;
         signals: { signal: string; vendors: string[] }[];
         recommendations: { id: string; title: string; reason: string }[];
         aiAct: boolean;
-      };
+      }>(res);
       return text({
         ...data,
         // Mismo aviso de deriva que check_compliance: lo detectado en el sitio
@@ -578,7 +721,11 @@ server.tool(
       .string()
       .optional()
       .describe("Privacy contact email, if already known (overrides the derived one)."),
-    appId: z.string().optional().describe("LexVibe app id (defaults to LEXVIBE_APP_ID)."),
+    appId: z
+      .string()
+      .regex(APP_ID_RE)
+      .optional()
+      .describe("LexVibe app id (defaults to LEXVIBE_APP_ID)."),
     markets: z
       .array(
         z.enum([
@@ -612,7 +759,7 @@ server.tool(
   },
   async ({ dir, appName, entity, contactEmail, appId, markets, accent, position, lang }) => {
     trackToolCall("make_compliant");
-    const id = appId ?? APP_ID;
+    const id = resolveAppId(appId);
     const opts = { accent, position, lang };
     const steps: string[] = [];
     const written: string[] = [];
@@ -664,19 +811,26 @@ server.tool(
 
     // 2) Generar documentos (sin sesión: hasta 3 idiomas, sin persistir).
     try {
-      const res = await fetch(`${API}/api/generate`, {
+      const res = await apiFetch(`${API}/api/generate`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ answers, markets }),
       });
       if (res.ok) {
-        const data = (await res.json()) as {
+        const data = await apiJson<{
           documents?: { docType: string; locale: string; content: string; source?: string }[];
-        };
+        }>(res);
         const legalDir = join(dir, "legal");
         mkdirSync(legalDir, { recursive: true });
         for (const doc of data.documents ?? []) {
+          // `docType` y `locale` vienen de la RESPUESTA de la API, no del
+          // usuario: un servidor hostil (LEXVIBE_API_URL apuntado a otro host,
+          // API comprometida) metía `../../` y escribía donde quisiera en el
+          // disco. Se escribe solo si ambos tienen la forma esperada, y aun así
+          // se comprueba que la ruta final no se sale de /legal.
+          if (!DOC_TYPE_RE.test(doc.docType) || !LOCALE_RE.test(doc.locale)) continue;
           const path = join(legalDir, `${doc.docType}.${doc.locale}.md`);
+          if (path !== join(legalDir, basename(path))) continue;
           writeFileSync(path, doc.content, "utf8");
           written.push(path);
           // Sin `source` explícito asumimos plantilla (la generación anónima nunca usa IA).
@@ -744,7 +898,7 @@ server.tool(
     // 4) Clasificar EU AI Act.
     let aiAct: unknown = null;
     try {
-      const res = await fetch(`${API}/api/ai-act/classify`, {
+      const res = await apiFetch(`${API}/api/ai-act/classify`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -752,7 +906,7 @@ server.tool(
           generatesContent: answers.usesGenerativeAI === true,
         }),
       });
-      if (res.ok) aiAct = await res.json();
+      if (res.ok) aiAct = await apiJson(res);
     } catch {
       /* opcional */
     }
@@ -871,20 +1025,20 @@ server.tool(
       (platforms.includes("ios") || platforms.includes("android")) && !platforms.includes("web");
     const platform = mobileOnly ? (platforms.includes("ios") ? "ios" : "android") : undefined;
     try {
-      const res = await fetch(`${API}/api/claim/start`, {
+      const res = await apiFetch(`${API}/api/claim/start`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ url, appName, markets, answers, platform, facts, locales, signals }),
       });
       if (!res.ok) {
-        const err = (await res.json().catch(() => null)) as { error?: string } | null;
+        const err = await apiJson<{ error?: string } | null>(res).catch(() => null);
         return toolError(err?.error ?? `API ${res.status}`);
       }
-      const data = (await res.json()) as {
+      const data = await apiJson<{
         claimUrl: string;
         code: string;
         expiresAt: string;
-      };
+      }>(res);
       return text({
         ...data,
         instructions:
@@ -909,15 +1063,15 @@ server.tool(
   async ({ code }) => {
     trackToolCall("get_claim_status");
     try {
-      const res = await fetch(`${API}/api/claim/${encodeURIComponent(code)}`);
+      const res = await apiFetch(`${API}/api/claim/${encodeURIComponent(code)}`);
       if (res.status === 404) {
         return toolError("Unknown claim code. Create a new claim with claim_app.");
       }
       if (!res.ok) {
-        const err = (await res.json().catch(() => null)) as { error?: string } | null;
+        const err = await apiJson<{ error?: string } | null>(res).catch(() => null);
         return toolError(err?.error ?? `API ${res.status}`);
       }
-      const data = (await res.json()) as {
+      const data = await apiJson<{
         status: "pending" | "expired" | "claimed";
         appId?: string;
         snippet?: string | null;
@@ -930,7 +1084,7 @@ server.tool(
          * comportamiento de siempre y nunca inventa un muro que no existe.
          */
         published?: boolean;
-      };
+      }>(res);
       if (data.status === "claimed") {
         // Datos que el humano debe COMPLETAR (draft-first): el código no puede
         // saberlos, así que el agente se los pide al usuario en vez de dejar

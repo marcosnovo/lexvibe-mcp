@@ -49,8 +49,9 @@ activity your documents don't cover yet. LexVibe calls this **drift**, and the
 MCP server is the sensor that lives inside your AI dev loop: the same
 assistant that adds the SDK can catch the compliance gap before you deploy.
 
-Paste this standing rule into your assistant's project rules (`CLAUDE.md`,
-`.cursorrules`, `.windsurfrules`…):
+Paste this standing rule into your assistant's project rules — `AGENTS.md`
+(Codex, Gemini CLI and most agents), `CLAUDE.md`, `.cursorrules`,
+`.windsurfrules`…:
 
 > After adding any SDK, analytics, payments, auth or AI integration to this
 > project, run LexVibe's `check_compliance` tool and follow its
@@ -108,6 +109,40 @@ npx -y @lexvibe/mcp   # or build from source: npm run build -w packages/mcp
 Claude Desktop uses the same `mcpServers` structure in
 `claude_desktop_config.json`.
 
+### Codex CLI (`~/.codex/config.toml`)
+
+Codex is the one client that does **not** use the `mcpServers` JSON above — its
+config is TOML:
+
+```bash
+codex mcp add lexvibe -- npx -y @lexvibe/mcp
+```
+
+Or by hand:
+
+```toml
+[mcp_servers.lexvibe]
+command = "npx"
+args = ["-y", "@lexvibe/mcp"]
+env = { LEXVIBE_APP_ID = "YOUR_APP_ID" }
+```
+
+Project-scoped config lives in `.codex/config.toml` (trusted projects only).
+
+### Gemini CLI (`~/.gemini/settings.json`)
+
+Same `mcpServers` shape as Cursor. For the **remote** server use `httpUrl`, not
+`url`: in Gemini CLI `url` means SSE, and this endpoint speaks Streamable HTTP
+only, so `url` fails without saying why.
+
+```json
+{
+  "mcpServers": {
+    "lexvibe": { "httpUrl": "https://golexvibe.com/api/mcp" }
+  }
+}
+```
+
 ## Remote MCP (no install)
 
 Browser-based agents that cannot run local processes — claude.ai / Claude
@@ -131,6 +166,8 @@ account. Stdio-only clients can bridge to it with
 | ------------------------------------- | ----------------- | ------------------------------------------------------- |
 | Claude Code                           | stdio (or remote) | `claude mcp add lexvibe -- npx -y @lexvibe/mcp`         |
 | Cursor / Windsurf / Cline / VS Code   | stdio             | `mcpServers` config with `npx -y @lexvibe/mcp`          |
+| Codex CLI                             | stdio (or remote) | `codex mcp add lexvibe -- npx -y @lexvibe/mcp`          |
+| Gemini CLI                            | stdio (or remote) | `mcpServers` in `~/.gemini/settings.json`               |
 | Zed                                   | stdio (or remote) | `context_servers` in `settings.json`                    |
 | Claude Desktop / claude.ai            | remote            | Settings → Connectors → `https://golexvibe.com/api/mcp` |
 | ChatGPT                               | remote            | Settings → Connectors → `https://golexvibe.com/api/mcp` |

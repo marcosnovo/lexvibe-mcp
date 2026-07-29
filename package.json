@@ -1,8 +1,8 @@
 {
   "name": "@lexvibe/mcp",
-  "version": "0.1.8",
+  "version": "0.1.9",
   "mcpName": "io.github.marcosnovo/lexvibe",
-  "description": "LexVibe MCP server — one-step legal compliance for vibe-coded apps: privacy policy, terms of service, cookie consent banner and EU AI Act check from Claude Code, Cursor or any MCP client.",
+  "description": "LexVibe MCP server — one-step legal compliance for vibe-coded apps: privacy policy, terms of service, cookie consent banner and EU AI Act check from Claude Code, Cursor, Codex, Gemini CLI or any MCP client.",
   "license": "MIT",
   "type": "module",
   "homepage": "https://golexvibe.com",
@@ -40,7 +40,13 @@
     "dpa",
     "windsurf",
     "chatgpt",
-    "base44"
+    "base44",
+    "codex",
+    "gemini",
+    "gemini-cli",
+    "agents-md",
+    "zed",
+    "cline"
   ],
   "bin": {
     "lexvibe-mcp": "dist/index.js"
