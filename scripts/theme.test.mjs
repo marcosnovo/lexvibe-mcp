@@ -115,3 +115,53 @@ test("detecta la fuente de next/font para poder anunciarla", () => {
   });
   assert.equal(extractTheme(dir).font, "Inter");
 });
+
+test("sigue buscando si el primer CSS no tiene tokens", () => {
+  // Repartir el CSS en varios ficheros es lo normal: un Vite típico tiene el
+  // reset en src/index.css y la paleta en src/App.css. Al parar en el primero
+  // que existía, un proyecto CON paleta acababa con el color por defecto.
+  const dir = project({
+    "src/index.css": `* { margin: 0; box-sizing: border-box; }`,
+    "src/App.css": `:root { --primary: #0ea5e9; --background: #ffffff; }`,
+  });
+  const t = parse(extractTheme(dir).tokens);
+  assert.equal(t.c, "#0ea5e9");
+  assert.equal(t.bg, "#ffffff");
+});
+
+test("el primer CSS gana si AMBOS tienen tokens", () => {
+  // El orden de CSS_CANDIDATES es una preferencia: globals.css de Next manda
+  // sobre App.css. Buscar más allá no debe cambiar esa prioridad.
+  const dir = project({
+    "src/app/globals.css": `:root { --primary: #111111; }`,
+    "src/App.css": `:root { --primary: #999999; }`,
+  });
+  assert.equal(parse(extractTheme(dir).tokens).c, "#111111");
+});
+
+test("sin tokens en ninguno, el modo oscuro se sigue detectando", () => {
+  // El respaldo al primer CSS existente importa: detectDark lo mira aunque no
+  // haya tokens que heredar.
+  const dir = project({
+    "src/index.css": `.dark { color: white; }`,
+    "public/manifest.json": `{"theme_color":"#ff8800"}`,
+  });
+  const t = extractTheme(dir);
+  assert.equal(parse(t.tokens).c, "#ff8800");
+  assert.match(t.dark ?? "", /class/);
+});
+
+test("el modo oscuro se detecta aunque esté en otro fichero que los tokens", () => {
+  // El reparto típico: reset y `.dark` en index.css, paleta en App.css. Mirando
+  // solo el fichero que aporta los tokens claros, el host salía como
+  // `dark: "none"` y sin tokens oscuros aunque los tuviera declarados.
+  const dir = project({
+    "src/index.css": `* { margin: 0 }
+      .dark { --primary: #eeeeee; --background: #000000; }`,
+    "src/App.css": `:root { --primary: #0ea5e9; --background: #ffffff; }`,
+  });
+  const t = extractTheme(dir);
+  assert.equal(parse(t.tokens).c, "#0ea5e9");
+  assert.equal(t.dark, "class");
+  assert.equal(parse(t.tokensDark ?? "").c, "#eeeeee");
+});

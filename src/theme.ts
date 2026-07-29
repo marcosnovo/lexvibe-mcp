@@ -163,18 +163,38 @@ function detectDark(dir: string, css: string): "class" | "media" | "none" {
 }
 
 export function extractTheme(dir: string): ExtractedTheme | null {
+  // Se recorren TODOS los candidatos hasta encontrar uno con tokens, en vez de
+  // parar en el primero que exista: es normal repartir el CSS en varios
+  // ficheros (un Vite típico tiene el reset en src/index.css y los tokens en
+  // src/App.css), y quedarse con el primero significaba caer al color por
+  // defecto en proyectos que SÍ tenían paleta. El primero que exista se guarda
+  // igualmente como respaldo, porque detectDark mira el CSS aunque no haya
+  // tokens (`.dark {}`, prefers-color-scheme).
   let css = "";
   let cssPath = "";
+  let tokens = "";
+  // El modo oscuro se busca en TODOS los candidatos, no solo en el que aporta
+  // los tokens claros: es justo el reparto que este bucle viene a soportar
+  // (reset y `.dark` en index.css, paleta en App.css). Mirando solo el fichero
+  // ganador, un host con modo oscuro declarado salía como `dark: "none"` y sin
+  // tokens oscuros.
+  let allCss = "";
   for (const rel of CSS_CANDIDATES) {
     const found = read(dir, rel);
-    if (found) {
+    if (!found) continue;
+    allCss += `\n${found}`;
+    if (!css) {
       css = found;
       cssPath = rel;
-      break;
+    }
+    if (tokens) continue;
+    const candidateTokens = declarations(rootBlock(found));
+    if (candidateTokens) {
+      css = found;
+      cssPath = rel;
+      tokens = candidateTokens;
     }
   }
-
-  const tokens = css ? declarations(rootBlock(css)) : "";
 
   // Fallbacks for apps with no design-token layer at all: a theme colour is
   // still far better than shipping our purple.
@@ -195,16 +215,16 @@ export function extractTheme(dir: string): ExtractedTheme | null {
       tokens: `--lv-c:${accent}`,
       source: themeColor ? "manifest theme_color" : "meta theme-color",
       font: detectFont(dir),
-      dark: detectDark(dir, css),
+      dark: detectDark(dir, allCss),
     };
   }
 
-  const darkTokens = declarations(darkBlock(css));
+  const darkTokens = declarations(darkBlock(allCss));
   return {
     tokens,
     ...(darkTokens ? { tokensDark: darkTokens } : {}),
     source: cssPath,
     font: detectFont(dir),
-    dark: detectDark(dir, css),
+    dark: detectDark(dir, allCss),
   };
 }
