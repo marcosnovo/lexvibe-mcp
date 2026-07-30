@@ -308,7 +308,7 @@ server.tool(
   "check_compliance",
   "Read-only compliance readiness check. Run this after adding any SDK, analytics, payment, auth or AI integration — it detects processing activities your legal documents don't cover yet. It scans the project, detects platforms and data processing, auto-derives what it can (app name, legal entity, contact email) and reports which human facts are still missing (including target markets). Returns {platforms, detected, derived, provided, missing, ready, agentPrompt}: `ready` is true only when no human fact is missing, and `agentPrompt` is a prompt you (the dev agent) can answer from the repo, so document generation needs no forms. Never modifies files; errors if `dir` does not exist or is not a project root. Call it before make_compliant when you want to confirm facts first; re-run it with the answers as arguments until `ready` is true.",
   {
-    dir: z.string().describe("Project root path."),
+    dir: z.string().describe("Path of the project root to analyze (absolute paths are safest)."),
     appName: z.string().optional().describe("Override the auto-derived app name."),
     entity: z
       .string()
@@ -503,8 +503,15 @@ server.tool(
     position: z
       .enum(["bottom", "bottom-left", "bottom-right"])
       .optional()
-      .describe("Where the banner sits on screen."),
-    lang: z.string().optional().describe("Force the banner language (default: the page's)."),
+      .describe(
+        "Where the banner sits on screen: bottom (full-width bar), bottom-left or bottom-right (floating card in that corner). Defaults to bottom.",
+      ),
+    lang: z
+      .string()
+      .optional()
+      .describe(
+        "Force the banner's language as an ISO 639-1 code, e.g. 'en' or 'es' (one of the 12 LexVibe locales). Defaults to the page's own language.",
+      ),
     theme: z
       .enum(["auto", "off"])
       .optional()
@@ -771,7 +778,11 @@ server.tool(
   "verify_snippet",
   "Verify that the LexVibe cookie-banner snippet is actually LIVE on a deployed site: fetches the public URL and looks for the widget marker in the served HTML. Run it after deploying (install_snippet edits local files — this confirms the change reached production). Only public http(s) hosts are allowed — localhost, private-network and reserved addresses are rejected. Returns {status: 'ok' | 'missing' | 'unknown'}. If 'missing', the snippet was not found: check that the deploy included the change, or re-run install_snippet and deploy again.",
   {
-    url: z.string().describe("Public URL (or bare domain) of the deployed site to verify."),
+    url: z
+      .string()
+      .describe(
+        "Public URL (or bare domain) of the deployed site to verify, e.g. https://myapp.com or myapp.com. Must be publicly reachable.",
+      ),
   },
   {
     title: "Verify the snippet is live",
@@ -824,7 +835,7 @@ server.tool(
   "make_compliant",
   "One-step legal compliance: scan the project, generate privacy policy / terms / cookie & AI disclosures (written as Markdown to <dir>/legal), install the cookie-banner snippet before </head> (web only; skipped for native apps, and JSX layouts get manual instructions instead of being modified), and classify EU AI Act risk. Use this first when the user asks to make their app legally compliant, GDPR-ready, or to add a privacy policy or cookie banner; use check_compliance instead for a read-only report. Returns {done, filesWritten, documents, source, snippet, aiAct, missingFacts, agentPrompt, nextSteps} — if source is 'template' or missingFacts is non-empty, answer the agentPrompt and re-run with appName/entity/contactEmail/markets for complete documents. Aborts without writing anything if `dir` does not exist or is not a project root.",
   {
-    dir: z.string().describe("Project root path."),
+    dir: z.string().describe("Path of the project root to analyze (absolute paths are safest)."),
     appName: z
       .string()
       .optional()
@@ -876,8 +887,15 @@ server.tool(
     position: z
       .enum(["bottom", "bottom-left", "bottom-right"])
       .optional()
-      .describe("Where the banner sits on screen."),
-    lang: z.string().optional().describe("Force the banner language (default: the page's)."),
+      .describe(
+        "Where the banner sits on screen: bottom (full-width bar), bottom-left or bottom-right (floating card in that corner). Defaults to bottom.",
+      ),
+    lang: z
+      .string()
+      .optional()
+      .describe(
+        "Force the banner's language as an ISO 639-1 code, e.g. 'en' or 'es' (one of the 12 LexVibe locales). Defaults to the page's own language.",
+      ),
   },
   {
     title: "Make app compliant (one step)",
@@ -1111,7 +1129,9 @@ server.tool(
         ]),
       )
       .optional()
-      .describe("Regions where the app has users. Defaults to [eu]."),
+      .describe(
+        "Regions where the app has users; each market pack cites its frameworks: eu → GDPR/ePrivacy, uk → UK GDPR/PECR, us → CCPA/CPRA, ca → PIPEDA, latam → LGPD…; 'global' covers all of them at the highest common bar. Defaults to [eu].",
+      ),
     answers: z
       .record(z.union([z.string(), z.boolean(), z.array(z.string())]))
       .optional()
@@ -1122,12 +1142,14 @@ server.tool(
       .record(z.unknown())
       .optional()
       .describe(
-        "scan_project's `facts` (structured evidence: auth methods, payments, AI flags, tracking, device permissions). Pass it through unchanged — it anchors the generated documents in evidence.",
+        "scan_project's `facts` object as-is: { authMethods: (apple/google/email/other)[], payments: apple_iap/google_play/stripe/other/none, ai: { userFacing, serverSide, processesPersonalData, providers }, tracking: { idfa, att, adSdks }, devicePermissions: string[] }. Pass it through unchanged — it anchors the generated documents in evidence.",
       ),
     locales: z
       .array(z.string())
       .optional()
-      .describe("scan_project's `locales` — languages the app actually supports."),
+      .describe(
+        "scan_project's `locales` — ISO 639-1 language codes the app actually supports, e.g. ['en', 'es'].",
+      ),
     signals: z
       .array(z.object({ signal: z.string(), vendors: z.array(z.string()) }))
       .optional()
