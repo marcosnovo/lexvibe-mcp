@@ -1,0 +1,28 @@
+# El proxy de git de las sesiones remotas no permite empujar tags, así que la
+# release se crea desde el propio runner (que sí tiene permiso) con el
+# GITHUB_TOKEN del workflow. Se lanza a mano con workflow_dispatch.
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to release (e.g. v1.0.0)"
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ inputs.tag }}" \
+            --target "${{ github.sha }}" \
+            --title "${{ inputs.tag }}" \
+            --notes-file .github/release-notes/"${{ inputs.tag }}".md
