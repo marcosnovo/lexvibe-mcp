@@ -597,7 +597,7 @@ server.tool(
 
 server.tool(
   "check_ai_act",
-  "Classify a product's risk level under the EU AI Act — minimal, limited, high or prohibited — and return the applicable obligations, each with its compliance deadline (limited-risk transparency duties apply from Aug 2, 2026; Annex III high risk from Dec 2, 2027). Answer the boolean questions from what you know about the product (scan_project's suggestedAnswers.usesGenerativeAI maps to usesAI + generatesContent); leave unknowns at their defaults. Returns {level, headline, explanation, obligations: [{title, description, deadline}]}. Read-only, no signup; requires network access to the LexVibe API (errors return {error} with isError). Use it when the user asks whether the EU AI Act applies to them or after adding an AI feature; make_compliant already includes a basic version of this check.",
+  "Classify a product's risk level under the EU AI Act — minimal, limited, high or prohibited — and return the applicable obligations, each with its compliance deadline (limited-risk transparency duties apply from Aug 2, 2026; Annex III high risk from Dec 2, 2027). The boolean parameters fall into three groups, all optional and defaulting to the safest 'not applicable' value: (1) transparency triggers — usesAI, interactsWithPeople, generatesContent, automatedDecisions; (2) the eight prohibited practices of art. 5 — socialScoring, realtimeBiometricPublic + realtimeBiometricLawEnforcement, emotionRecognitionWorkEducation, biometricCategorisationSensitive, untargetedFaceScraping, manipulativeOrExploitative, individualPredictivePolicing; (3) high-risk triggers — embeddedInRegulatedProduct, annexIII domains. Answer from what you know about the product (scan_project's suggestedAnswers.usesGenerativeAI maps to usesAI + generatesContent); leave unknowns at their defaults, which never over-report risk. Returns {level, headline, explanation, obligations: [{title, description, deadline}]}. Read-only, no signup; requires network access to the LexVibe API (errors return {error} with isError). Use it when the user asks whether the EU AI Act applies to them or after adding an AI feature; make_compliant already includes a basic version of this check.",
   {
     usesAI: z
       .boolean()
@@ -648,25 +648,25 @@ server.tool(
       .boolean()
       .default(false)
       .describe(
-        "Emotion recognition of people in the workplace or in education (art. 5.1.f)? Prohibited.",
+        "Does it infer emotions (frustration, attention, mood…) from employees at work or students in education, e.g. to flag disengaged staff or bored students (art. 5.1.f)? Prohibited. Emotion inference on end users of a public consumer product (not their employees/students) is NOT this.",
       ),
     biometricCategorisationSensitive: z
       .boolean()
       .default(false)
       .describe(
-        "Biometric categorisation inferring sensitive attributes — race, political opinion, religion, sexual orientation… (art. 5.1.g)? Prohibited.",
+        "Does it use biometric data (face, voice, gait…) to infer sensitive attributes — race, political opinion, religion, trade-union membership, sexual orientation (art. 5.1.g)? Prohibited. Ordinary face-unlock or liveness checks that don't infer these attributes are NOT this.",
       ),
     untargetedFaceScraping: z
       .boolean()
       .default(false)
       .describe(
-        "Untargeted scraping of facial images from the internet or CCTV to build face-recognition databases (art. 5.1.e)? Prohibited.",
+        "Does it untargetedly scrape facial images from the internet or CCTV footage to build or expand a face-recognition database (art. 5.1.e)? Prohibited. Matching a user's own consented selfie against their own ID photo is NOT this.",
       ),
     manipulativeOrExploitative: z
       .boolean()
       .default(false)
       .describe(
-        "Subliminal/manipulative techniques, or exploiting vulnerabilities (age, disability, social situation) causing harm (art. 5.1.a-b)? Prohibited.",
+        "Does it use subliminal techniques beyond a person's consciousness, or exploit a known vulnerability (age, disability, specific social or economic situation) to materially distort behavior and cause harm — e.g. dark patterns targeting a diagnosed gambling addiction (art. 5.1.a-b)? Prohibited. Ordinary persuasive marketing or UX nudges aimed at the general population are NOT this.",
       ),
     individualPredictivePolicing: z
       .boolean()
