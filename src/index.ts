@@ -427,7 +427,7 @@ server.tool(
       )
       .min(1)
       .describe(
-        "Regions where the app has users (at least one). Each market pack cites its frameworks: eu → GDPR/ePrivacy, uk → UK GDPR/PECR, us → CCPA/CPRA, ca → PIPEDA, latam → LGPD…; 'global' covers all of them at the highest common bar.",
+        "Regions where the app has users (at least one). Each market pack cites its own frameworks: eu → GDPR/ePrivacy, uk → UK GDPR/PECR, us → CCPA/CPRA, ca → PIPEDA, latam → LGPD…; 'global' is NOT a union of the others — it only cites generic OECD international privacy best practices, for users outside every listed market. To cover several specific frameworks, list each market explicitly, e.g. ['eu', 'us', 'latam'].",
       ),
     locales: z
       .array(z.enum(["es", "en", "fr", "de", "it", "pt", "nl", "ja", "zh", "ko", "hi", "ar"]))
@@ -1130,7 +1130,7 @@ server.tool(
       )
       .optional()
       .describe(
-        "Regions where the app has users; each market pack cites its frameworks: eu → GDPR/ePrivacy, uk → UK GDPR/PECR, us → CCPA/CPRA, ca → PIPEDA, latam → LGPD…; 'global' covers all of them at the highest common bar. Defaults to [eu].",
+        "Regions where the app has users; each market pack cites its own frameworks: eu → GDPR/ePrivacy, uk → UK GDPR/PECR, us → CCPA/CPRA, ca → PIPEDA, latam → LGPD…; 'global' is NOT a union of the others — it only cites generic OECD international privacy best practices, for users outside every listed market. To cover several specific frameworks, list each market explicitly, e.g. ['eu', 'us', 'latam']. Defaults to [eu].",
       ),
     answers: z
       .record(z.union([z.string(), z.boolean(), z.array(z.string())]))
