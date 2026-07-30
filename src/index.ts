@@ -264,7 +264,7 @@ function normalizeUrl(domain: string): string {
 }
 
 const server = new McpServer(
-  { name: "lexvibe", version: "0.1.9" },
+  { name: "lexvibe", version: "1.0.0" },
   {
     instructions:
       "LexVibe makes vibe-coded apps (Lovable, Bolt, v0, Next.js, plain HTML) legally compliant: GDPR privacy policy, terms of service, cookie consent banner with real script blocking, and EU AI Act risk classification. When the user asks to make their app legally compliant, GDPR-ready, or to add a privacy policy / terms / cookie banner, call make_compliant first (one step). Use check_compliance for a read-only readiness report, scan_project to detect data processing, generate_policies for documents only, install_snippet to add the cookie banner to a specific file, and check_ai_act to classify EU AI Act risk. If no real LexVibe app id is configured (LEXVIBE_APP_ID missing or a placeholder), call claim_app to get a link the user opens to create a real app in their account, then poll get_claim_status for the real app id and snippet. Legal documents describe the app as it was when they were generated: after adding any SDK, analytics, payments, auth or AI integration, run check_compliance again and regenerate the documents if it reports processing they don't cover yet.",
@@ -289,8 +289,10 @@ function toolError(message: string) {
 
 server.tool(
   "scan_project",
-  "Read-only scan of a local project (dependencies + source code + mobile manifests). Detects data processing relevant to legal compliance — analytics, payments, generative AI (distinguishing user-facing AI from server-side-only AI), email collection, third-party sharing — plus structured `facts` (auth methods, payments channel, AI flags, tracking/IDFA, device permissions), the `locales` the app supports and the product platforms (web / iOS / Android). Pass suggestedAnswers to generate_policies, and pass `facts`, `locales` and `signals` to claim_app so the generated documents are anchored in evidence.",
-  { dir: z.string().describe("Path to the project to analyze (repo root).") },
+  "Read-only scan of a local project (dependencies + source code + mobile manifests). Detects data processing relevant to legal compliance — analytics, payments, generative AI (distinguishing user-facing AI from server-side-only AI), email collection, third-party sharing — and returns {signals, suggestedAnswers, facts, locales, platforms}: per-vendor `signals`, compliance flags in `suggestedAnswers`, structured `facts` (auth methods, payments channel, AI flags, tracking/IDFA, device permissions), the `locales` the app supports and the product platforms (web / iOS / Android). Run it first: pass suggestedAnswers to generate_policies, and `facts`, `locales` and `signals` to claim_app so the generated documents are anchored in evidence. Never modifies files; errors if `dir` does not exist or is not a project root. For a deployed site whose code you don't have, use check_website instead.",
+  {
+    dir: z.string().describe("Path of the project root to analyze (absolute paths are safest)."),
+  },
   { title: "Scan project", readOnlyHint: true, destructiveHint: false, openWorldHint: false },
   async ({ dir }) => {
     trackToolCall("scan_project");
@@ -304,7 +306,7 @@ server.tool(
 
 server.tool(
   "check_compliance",
-  "Read-only compliance readiness check. Run this after adding any SDK, analytics, payment, auth or AI integration — it detects processing activities your legal documents don't cover yet. It scans the project, detects platforms and data processing, auto-derives what it can (app name, legal entity, contact email) and reports which human facts are still missing (including target markets). Returns an agentPrompt you (the dev agent) can answer from the repo, so document generation needs no forms. Call it before make_compliant when you want to confirm facts first.",
+  "Read-only compliance readiness check. Run this after adding any SDK, analytics, payment, auth or AI integration — it detects processing activities your legal documents don't cover yet. It scans the project, detects platforms and data processing, auto-derives what it can (app name, legal entity, contact email) and reports which human facts are still missing (including target markets). Returns {platforms, detected, derived, provided, missing, ready, agentPrompt}: `ready` is true only when no human fact is missing, and `agentPrompt` is a prompt you (the dev agent) can answer from the repo, so document generation needs no forms. Never modifies files; errors if `dir` does not exist or is not a project root. Call it before make_compliant when you want to confirm facts first; re-run it with the answers as arguments until `ready` is true.",
   {
     dir: z.string().describe("Project root path."),
     appName: z.string().optional().describe("Override the auto-derived app name."),
@@ -391,11 +393,21 @@ server.tool(
 
 server.tool(
   "generate_policies",
-  "Generate the legal documents (privacy policy, terms of service and, if applicable, an AI disclosure) localized and tailored to the target markets (GDPR, UK GDPR, CCPA…). Returns Markdown. Pass scan_project's suggestedAnswers as `answers` so the documents disclose the right processing.",
+  "Generate the legal documents (privacy policy, terms of service and, if applicable, an AI disclosure) localized and tailored to the target markets' frameworks (GDPR, UK GDPR, CCPA/CPRA, PIPEDA, LGPD…). Returns {documents: [{docType, locale, content, source}]} where content is Markdown and source is 'ai' or 'template' (template ⇒ not yet personalized — tell the user). Documents are returned only, never written to disk (make_compliant writes them to /legal) and nothing is persisted server-side. Run scan_project first and pass its suggestedAnswers as `answers` so the documents disclose the right processing; requires network access to the LexVibe API.",
   {
-    appName: z.string(),
-    entity: z.string().optional().describe("Data controller / legal entity."),
-    contactEmail: z.string().optional(),
+    appName: z.string().describe("App / business name shown in the documents, e.g. 'Acme Notes'."),
+    entity: z
+      .string()
+      .optional()
+      .describe(
+        "Data controller / legal entity (person or company legally responsible), e.g. 'Acme Labs S.L.'. If omitted, the documents keep a [to complete] placeholder.",
+      ),
+    contactEmail: z
+      .string()
+      .optional()
+      .describe(
+        "Privacy contact email published in the documents. If omitted, a [to complete] placeholder is left.",
+      ),
     markets: z
       .array(
         z.enum([
@@ -413,10 +425,16 @@ server.tool(
           "global",
         ]),
       )
-      .min(1),
+      .min(1)
+      .describe(
+        "Regions where the app has users (at least one). Each market pack cites its frameworks: eu → GDPR/ePrivacy, uk → UK GDPR/PECR, us → CCPA/CPRA, ca → PIPEDA, latam → LGPD…; 'global' covers all of them at the highest common bar.",
+      ),
     locales: z
       .array(z.enum(["es", "en", "fr", "de", "it", "pt", "nl", "ja", "zh", "ko", "hi", "ar"]))
-      .optional(),
+      .optional()
+      .describe(
+        "Languages to generate the documents in (ISO 639-1). Defaults to the markets' main languages; anonymous calls are capped at 3 locales. Pass scan_project's `locales` to match the languages the app actually ships.",
+      ),
     answers: z
       .record(z.union([z.string(), z.boolean(), z.array(z.string())]))
       .default({})
@@ -466,11 +484,22 @@ server.tool(
 
 server.tool(
   "install_snippet",
-  "Insert the LexVibe cookie-banner + hosted-policies snippet into an HTML file, right before </head>. If the file has no literal </head> (e.g. a Next.js App Router layout.tsx), it does NOT modify the file: it returns the snippet plus exact instructions for you (the dev agent) to add it as JSX. Never corrupts user files.",
+  "Insert the LexVibe cookie-banner + hosted-policies snippet into an HTML file, right before </head>. By default the banner is themed to match the app's own colors, fonts and radius (detected from its stylesheets). Idempotent: if the snippet is already in the file, nothing changes. If the file has no literal </head> (e.g. a Next.js App Router layout.tsx), it does NOT modify the file: it returns the snippet plus exact instructions for you (the dev agent) to add it as JSX — it never corrupts user files. After deploying, confirm with verify_snippet that the snippet is live.",
   {
-    file: z.string().describe("File to install into (index.html, app/layout.tsx…)."),
-    appId: z.string().regex(APP_ID_RE).optional().describe("App id (defaults to LEXVIBE_APP_ID)."),
-    accent: z.string().optional(),
+    file: z.string().describe("Path of the file to install into (index.html, app/layout.tsx…)."),
+    appId: z
+      .string()
+      .regex(APP_ID_RE)
+      .optional()
+      .describe(
+        "LexVibe app id, e.g. from claim_app/get_claim_status (defaults to the LEXVIBE_APP_ID env var; without either, the YOUR_APP_ID placeholder is used and flagged).",
+      ),
+    accent: z
+      .string()
+      .optional()
+      .describe(
+        "Banner accent color as a CSS hex value, e.g. #4f46e5. Defaults to the color detected from the app's own styles (see `theme`).",
+      ),
     position: z
       .enum(["bottom", "bottom-left", "bottom-right"])
       .optional()
@@ -568,19 +597,106 @@ server.tool(
 
 server.tool(
   "check_ai_act",
-  "Classify the system's risk under the EU AI Act and return the applicable obligations with their deadlines.",
+  "Classify a product's risk level under the EU AI Act — minimal, limited, high or prohibited — and return the applicable obligations, each with its compliance deadline (limited-risk transparency duties apply from Aug 2, 2026; Annex III high risk from Dec 2, 2027). Answer the boolean questions from what you know about the product (scan_project's suggestedAnswers.usesGenerativeAI maps to usesAI + generatesContent); leave unknowns at their defaults. Returns {level, headline, explanation, obligations: [{title, description, deadline}]}. Read-only, no signup; requires network access to the LexVibe API (errors return {error} with isError). Use it when the user asks whether the EU AI Act applies to them or after adding an AI feature; make_compliant already includes a basic version of this check.",
   {
-    usesAI: z.boolean().default(true),
-    interactsWithPeople: z.boolean().default(false),
-    generatesContent: z.boolean().default(false),
-    automatedDecisions: z.boolean().default(false),
-    socialScoring: z.boolean().default(false),
-    realtimeBiometricPublic: z.boolean().default(false),
+    usesAI: z
+      .boolean()
+      .default(true)
+      .describe(
+        "Does the product use AI at all (LLM calls, recommendations, computer vision…)? false ⇒ minimal risk, the AI Act does not apply.",
+      ),
+    interactsWithPeople: z
+      .boolean()
+      .default(false)
+      .describe(
+        "Do people interact directly with the AI (chatbot, voice assistant…)? Triggers the art. 50 duty to disclose they are talking to an AI.",
+      ),
+    generatesContent: z
+      .boolean()
+      .default(false)
+      .describe(
+        "Does it generate text, images, audio or video shown to users? Triggers the art. 50 duty to label AI-generated content.",
+      ),
+    automatedDecisions: z
+      .boolean()
+      .default(false)
+      .describe(
+        "Does it make automated decisions with legal or similarly significant effects on people (credit, hiring, admissions…)? Adds GDPR art. 22 duties; high risk only if an Annex III domain applies.",
+      ),
+    socialScoring: z
+      .boolean()
+      .default(false)
+      .describe(
+        "Does it score people's social behavior or traits causing detrimental treatment in unrelated contexts, or disproportionate to the behavior (art. 5.1.c)? Prohibited. A seller rating or fitness points app is NOT this.",
+      ),
+    realtimeBiometricPublic: z
+      .boolean()
+      .default(false)
+      .describe(
+        "Real-time remote biometric identification in publicly accessible spaces (e.g. live face recognition)? High risk (Annex III biometrics) — prohibited only when combined with realtimeBiometricLawEnforcement.",
+      ),
     // Cualificador del art. 5.1.h: sin él la prohibición era inalcanzable y un
     // sistema policial de biometría en tiempo real salía "alto riesgo, 2027"
     // en vez de "prohibido, ya en vigor".
-    realtimeBiometricLawEnforcement: z.boolean().default(false),
-    annexIII: z.array(z.string()).default([]),
+    realtimeBiometricLawEnforcement: z
+      .boolean()
+      .default(false)
+      .describe(
+        "Only if realtimeBiometricPublic: is it used for LAW ENFORCEMENT purposes? That combination is prohibited (art. 5.1.h) and already in force.",
+      ),
+    emotionRecognitionWorkEducation: z
+      .boolean()
+      .default(false)
+      .describe(
+        "Emotion recognition of people in the workplace or in education (art. 5.1.f)? Prohibited.",
+      ),
+    biometricCategorisationSensitive: z
+      .boolean()
+      .default(false)
+      .describe(
+        "Biometric categorisation inferring sensitive attributes — race, political opinion, religion, sexual orientation… (art. 5.1.g)? Prohibited.",
+      ),
+    untargetedFaceScraping: z
+      .boolean()
+      .default(false)
+      .describe(
+        "Untargeted scraping of facial images from the internet or CCTV to build face-recognition databases (art. 5.1.e)? Prohibited.",
+      ),
+    manipulativeOrExploitative: z
+      .boolean()
+      .default(false)
+      .describe(
+        "Subliminal/manipulative techniques, or exploiting vulnerabilities (age, disability, social situation) causing harm (art. 5.1.a-b)? Prohibited.",
+      ),
+    individualPredictivePolicing: z
+      .boolean()
+      .default(false)
+      .describe(
+        "Predicting an individual's criminal risk based solely on profiling or personality traits (art. 5.1.d)? Prohibited.",
+      ),
+    embeddedInRegulatedProduct: z
+      .boolean()
+      .default(false)
+      .describe(
+        "Is the AI a safety component embedded in an Annex I regulated product (toys, machinery, medical devices…)? High risk via art. 6.1, deadline Aug 2, 2028.",
+      ),
+    annexIII: z
+      .array(
+        z.enum([
+          "biometrics",
+          "critical",
+          "education",
+          "employment",
+          "essential",
+          "law",
+          "migration",
+          "justice",
+        ]),
+      )
+      .default([])
+      .describe(
+        "Annex III high-risk domains the system operates in: biometrics, critical (infrastructure), education, employment (HR/hiring), essential (credit, insurance, benefits), law (enforcement), migration, justice. Empty if none apply.",
+      ),
   },
   {
     title: "Classify EU AI Act risk",
@@ -606,11 +722,13 @@ server.tool(
 
 server.tool(
   "check_website",
-  "Free, no-signup compliance check of a DEPLOYED website by URL (the same public checker as the LexVibe /check page). Fetches the live page server-side and detects tracking/processing that actually ships to visitors — analytics, marketing pixels, payments, generative AI, email capture, third parties — and returns per-vendor signals plus concrete recommendations (which documents/banner the site needs) and whether the EU AI Act applies. Complements scan_project (which reads the local source): use check_website after deploying, or for a site whose code you don't have.",
+  "Free, no-signup compliance check of a DEPLOYED website by URL (the same public checker as the LexVibe /check page). Fetches the live page server-side and detects tracking/processing that actually ships to visitors — analytics, marketing pixels, payments, generative AI, email capture, third parties. Returns {url, signals: [{signal, vendors}], recommendations: [{id, title, reason}], aiAct} — which documents/banner the site needs and whether the EU AI Act applies. Read-only and rate-limited (a burst of calls returns an error asking to wait a minute). Complements scan_project (which reads the local source): use check_website after deploying, or for a site whose code you don't have.",
   {
     url: z
       .string()
-      .describe("Public URL (or bare domain) of the deployed site, e.g. https://myapp.com"),
+      .describe(
+        "Public URL (or bare domain) of the deployed site, e.g. https://myapp.com or myapp.com. Must be publicly reachable.",
+      ),
   },
   {
     title: "Check a deployed website",
@@ -704,7 +822,7 @@ server.tool(
 
 server.tool(
   "make_compliant",
-  "One-step legal compliance: scan the project, generate privacy policy / terms / cookie & AI disclosures (written to /legal), install the cookie-banner snippet into the HTML head, and classify EU AI Act risk. Use this first when the user asks to make their app legally compliant, GDPR-ready, or to add a privacy policy or cookie banner. Returns a summary, any missing human facts, and next steps.",
+  "One-step legal compliance: scan the project, generate privacy policy / terms / cookie & AI disclosures (written as Markdown to <dir>/legal), install the cookie-banner snippet before </head> (web only; skipped for native apps, and JSX layouts get manual instructions instead of being modified), and classify EU AI Act risk. Use this first when the user asks to make their app legally compliant, GDPR-ready, or to add a privacy policy or cookie banner; use check_compliance instead for a read-only report. Returns {done, filesWritten, documents, source, snippet, aiAct, missingFacts, agentPrompt, nextSteps} — if source is 'template' or missingFacts is non-empty, answer the agentPrompt and re-run with appName/entity/contactEmail/markets for complete documents. Aborts without writing anything if `dir` does not exist or is not a project root.",
   {
     dir: z.string().describe("Project root path."),
     appName: z
@@ -725,7 +843,9 @@ server.tool(
       .string()
       .regex(APP_ID_RE)
       .optional()
-      .describe("LexVibe app id (defaults to LEXVIBE_APP_ID)."),
+      .describe(
+        "LexVibe app id (defaults to the LEXVIBE_APP_ID env var). Without a real id the snippet uses the YOUR_APP_ID placeholder and the result tells you to call claim_app.",
+      ),
     markets: z
       .array(
         z.enum([
@@ -743,8 +863,16 @@ server.tool(
           "global",
         ]),
       )
-      .default(["eu"]),
-    accent: z.string().optional(),
+      .default(["eu"])
+      .describe(
+        'Regions where the app has users; they decide which frameworks the documents cover (eu → GDPR, uk → UK GDPR, us → CCPA/CPRA…). Defaults to ["eu"] — confirm with the user before accepting that default.',
+      ),
+    accent: z
+      .string()
+      .optional()
+      .describe(
+        "Banner accent color as a CSS hex value, e.g. #4f46e5. Defaults to the LexVibe accent.",
+      ),
     position: z
       .enum(["bottom", "bottom-left", "bottom-right"])
       .optional()
@@ -953,7 +1081,7 @@ server.tool(
 
 server.tool(
   "claim_app",
-  "Create a REAL LexVibe app in the user's account (replaces the YOUR_APP_ID placeholder). Returns a claim link: show it to the user so they can sign in and confirm — the link expires in 30 minutes. After they confirm, call get_claim_status with the returned code to retrieve the real app id and install snippet. Use this whenever no real LEXVIBE_APP_ID is configured, so hosted policies, consent proof and auto-updates get linked to the user's account.",
+  "Create a REAL LexVibe app in the user's account (replaces the YOUR_APP_ID placeholder). Returns {claimUrl, code, expiresAt}: show claimUrl to the user so they can sign in and confirm — the link expires in 30 minutes. After they confirm, call get_claim_status with `code` to retrieve the real app id and install snippet. Requires `url` or `appName` (errors otherwise). Use this whenever no real LEXVIBE_APP_ID is configured, so hosted policies, consent proof and auto-updates get linked to the user's account; creates nothing until the user confirms the link.",
   {
     url: z
       .string()
@@ -1052,8 +1180,12 @@ server.tool(
 
 server.tool(
   "get_claim_status",
-  "Check whether the user has confirmed a claim created with claim_app. While the user hasn't confirmed yet it returns {status: 'pending'} — wait a few seconds and call again (the link expires in 30 minutes). Once claimed it returns the REAL app id, the install snippet, the hosted privacy-policy URL and a `pending` list of details the code can't know (e.g. the controller's legal name) that the user must still provide: replace any placeholder (YOUR_APP_ID) snippet with the real one, and ask the user for the pending items so the documents can be published.",
-  { code: z.string().describe("The claim code returned by claim_app.") },
+  "Check whether the user has confirmed a claim created with claim_app. Returns {status: 'pending' | 'expired' | 'claimed', …}. While 'pending', wait a few seconds and call again (the link expires in 30 minutes; 'expired' ⇒ create a new claim). Once 'claimed' it adds the REAL appId, the install snippet, the hosted policyUrl, `published` (if false, do NOT install the snippet yet — the policy page would be a dead link until the user publishes from their dashboard) and a `pending` list of details the code can't know (e.g. the controller's legal name): replace any YOUR_APP_ID placeholder snippet with the real one and ask the user for the pending items. Errors on an unknown code.",
+  {
+    code: z
+      .string()
+      .describe("The claim code returned by claim_app (not the URL — the `code` field)."),
+  },
   {
     title: "Get claim status",
     readOnlyHint: true,
