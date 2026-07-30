@@ -1,5 +1,8 @@
 # @lexvibe/mcp
 
+[![lexvibe-mcp MCP server](https://glama.ai/mcp/servers/marcosnovo/lexvibe-mcp/badges/card.svg)](https://glama.ai/mcp/servers/marcosnovo/lexvibe-mcp)
+[![lexvibe-mcp MCP server](https://glama.ai/mcp/servers/marcosnovo/lexvibe-mcp/badges/score.svg)](https://glama.ai/mcp/servers/marcosnovo/lexvibe-mcp)
+
 LexVibe **MCP** server — one-step legal compliance for vibe-coded apps
 (Lovable, Bolt, v0, Next.js, plain HTML). Wire it into your AI assistant
 (Claude Code, Claude Desktop, Cursor…) and it makes your app "legally ready"
