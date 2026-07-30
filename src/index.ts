@@ -1105,7 +1105,7 @@ server.tool(
       .string()
       .optional()
       .describe(
-        "Public URL of the app (website or App Store / Google Play listing). LexVibe scans it on confirmation.",
+        "Public URL of the app: a website URL when answers.platformType includes 'web', or the App Store / Google Play listing URL when it's mobile-only (ios/android without web). LexVibe scans whichever kind of URL is provided on confirmation.",
       ),
     appName: z
       .string()
