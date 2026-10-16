@@ -3,11 +3,14 @@
 [![lexvibe-mcp MCP server](https://glama.ai/mcp/servers/marcosnovo/lexvibe-mcp/badges/card.svg)](https://glama.ai/mcp/servers/marcosnovo/lexvibe-mcp)
 [![lexvibe-mcp MCP server](https://glama.ai/mcp/servers/marcosnovo/lexvibe-mcp/badges/score.svg)](https://glama.ai/mcp/servers/marcosnovo/lexvibe-mcp)
 
-LexVibe **MCP** server — one-step legal compliance for vibe-coded apps
+[LexVibe](https://golexvibe.com?utm_source=mcp-readme) **MCP** server — one-step legal compliance for vibe-coded apps
 (Lovable, Bolt, v0, Next.js, plain HTML). Wire it into your AI assistant
 (Claude Code, Claude Desktop, Cursor…) and it makes your app "legally ready"
 without you knowing the law: privacy policy, terms of service, cookie consent
 banner with real script blocking, and an EU AI Act risk check.
+
+Not using an AI coding tool? The same checks run in the browser: paste your URL
+into the [free website checker](https://golexvibe.com/check?utm_source=mcp-readme) — no signup.
 
 ## Tools
 
@@ -21,7 +24,7 @@ banner with real script blocking, and an EU AI Act risk check.
 | `generate_policies` | Generate privacy policy / terms / AI disclosure, localized and tailored per market.                                                                                    |
 | `install_snippet`   | Insert the cookie-banner snippet before `</head>`; for JSX layouts it returns exact instructions instead.                                                              |
 | `check_ai_act`      | Classify EU AI Act risk and list the applicable obligations with deadlines.                                                                                            |
-| `claim_app`         | Create a REAL app in the user's LexVibe account: returns a link the user opens to sign in and confirm (30 min).                                                        |
+| `claim_app`         | Create a REAL app in the user's LexVibe account: returns a link the user opens to sign in and confirm (valid 7 days).                                                  |
 | `get_claim_status`  | Poll a claim created with `claim_app`; once confirmed it returns the real app id, install snippet and policy URL.                                                      |
 
 ## Typical use (natural language)
@@ -214,3 +217,11 @@ usage shows up alongside your website in the Platform analytics dashboard
 > writes files (`/legal/*.md` plus the snippet in your HTML head).
 > `claim_app` creates a pending claim in LexVibe; the app itself is only
 > created when the user confirms the link while signed in.
+
+## Learn more
+
+- [LexVibe](https://golexvibe.com?utm_source=mcp-readme) — hosted legal documents and a cookie banner with real script blocking, for web and mobile apps.
+- [Free website checker](https://golexvibe.com/check?utm_source=mcp-readme) — paste a URL and see which documents and consent your site needs. No signup.
+- [Compliance guides](https://golexvibe.com/guides?utm_source=mcp-readme) — each privacy law applied to the kind of product you built (SaaS, marketplace, mobile app, AI tool). Also [in Spanish](https://golexvibe.com/es/guides?utm_source=mcp-readme).
+- [Privacy and AI law reference](https://golexvibe.com/law?utm_source=mcp-readme) — every framework with its effective date, the rights it grants and its primary sources, also available as an [open dataset](https://golexvibe.com/api/dataset) (CC BY 4.0).
+- [Integration guides](https://golexvibe.com/docs/integrations?utm_source=mcp-readme) — setup for Claude, Cursor, Codex, Gemini CLI, ChatGPT, Lovable, Bolt, v0 and more.
