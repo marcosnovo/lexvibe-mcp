@@ -53,17 +53,21 @@ Other clients: https://golexvibe.com/docs/integrations
    config, existing legal pages). Ask the user only for what the repo does not
    say: legal entity name, contact email, target markets. **Never invent
    them.** Re-run `check_compliance` with the answers until `ready` is true.
-3. `make_compliant` with the same facts. It writes Markdown documents to
-   `legal/`, installs the cookie-banner snippet before `</head>` (web only; JSX
-   layouts get instructions instead) and classifies EU AI Act risk. Show the
-   user the files it wrote.
-4. If no real LexVibe app id is configured, the snippet uses the
-   `YOUR_APP_ID` placeholder. Offer `claim_app`: it returns a link the user
-   opens to create the app in their own account (hosted, versioned policies
-   and consent proof). Then poll `get_claim_status` and replace the
-   placeholder with the real id. If it returns `published: false`, do not
-   install the snippet yet: the policy link would be dead until the user
-   publishes from the dashboard.
+3. **Get a real app id before installing anything.** If `LEXVIBE_APP_ID` is
+   not set (or is the `YOUR_APP_ID` placeholder), offer `claim_app`: it
+   returns a link the user opens to create the app in their own account
+   (hosted, versioned policies and consent proof). Poll `get_claim_status`
+   until it is `claimed`. If it returns `published: false`, the policy link
+   would be dead until the user publishes from the dashboard: wait for that
+   before installing the snippet.
+4. `make_compliant` with the same facts and the real `appId`. It writes
+   Markdown documents to `legal/`, installs the cookie-banner snippet before
+   `</head>` (web only; JSX layouts get instructions instead) and classifies
+   EU AI Act risk. Show the user the files it wrote.
+   If the user declines to claim, `make_compliant` still writes the documents,
+   but the snippet carries `YOUR_APP_ID` and its links are dead. Tell the
+   user, and **do not deploy** until it is replaced (re-run `install_snippet`
+   with the real `appId`).
 5. After deploy, `verify_snippet` with the live URL confirms the banner ships.
 
 ## Workflow for a live site or store listing (remote server)
@@ -75,8 +79,9 @@ Other clients: https://golexvibe.com/docs/integrations
    full scan.
 2. `generate_policies` with the returned `suggestedAnswers` plus the user's
    facts.
-3. `get_install_snippet` for the exact install steps, or `claim_app` for a
-   real app id.
+3. `claim_app` for a real app id (same rules as above), then
+   `get_install_snippet` for the exact install steps. A snippet with
+   `YOUR_APP_ID` is not deployable.
 
 ## Mobile apps
 
