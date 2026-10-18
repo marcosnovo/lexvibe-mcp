@@ -23,8 +23,9 @@
  *   DO_NOT_TRACK         "1" | "true" para desactivar (estándar de facto)
  */
 
+import { VERSION } from "./version.ts";
+
 const SOURCE = "mcp_stdio";
-const VERSION = "1.0.0";
 /** Tope de la petición: la analítica nunca debe colgar el proceso. */
 const TIMEOUT_MS = 3000;
 

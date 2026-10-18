@@ -10,6 +10,7 @@ import { z } from "zod";
 // y `tsc` lo reescribe a .js en dist/ (antes el specifier ./detect.js no
 // existía en src/ y el modo dev arrancaba roto).
 import { deriveDefaults, scanProject } from "./detect.ts";
+import { VERSION } from "./version.ts";
 import { extractTheme } from "./theme.ts";
 import { trackToolCall } from "./analytics.ts";
 import { readCapped, safeFetch } from "./ssrf.ts";
@@ -264,7 +265,7 @@ function normalizeUrl(domain: string): string {
 }
 
 const server = new McpServer(
-  { name: "lexvibe", version: "1.0.4" },
+  { name: "lexvibe", version: VERSION },
   {
     instructions:
       "LexVibe makes vibe-coded apps (Lovable, Bolt, v0, Next.js, plain HTML) legally compliant: GDPR privacy policy, terms of service, cookie consent banner with real script blocking, and EU AI Act risk classification. When the user asks to make their app legally compliant, GDPR-ready, or to add a privacy policy / terms / cookie banner, call make_compliant first (one step). Use check_compliance for a read-only readiness report, scan_project to detect data processing, generate_policies for documents only, install_snippet to add the cookie banner to a specific file, and check_ai_act to classify EU AI Act risk. If no real LexVibe app id is configured (LEXVIBE_APP_ID missing or a placeholder), call claim_app to get a link the user opens to create a real app in their account, then poll get_claim_status for the real app id and snippet. Legal documents describe the app as it was when they were generated: after adding any SDK, analytics, payments, auth or AI integration, run check_compliance again and regenerate the documents if it reports processing they don't cover yet.",
