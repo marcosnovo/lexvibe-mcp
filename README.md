@@ -74,6 +74,14 @@ the GitHub integration), and the remote `check_website` tool additionally
 returns a `drift` section for claimed apps comparing the live site against
 the baseline the documents were generated from.
 
+## Agent skill
+
+[`skills/lexvibe-compliance/SKILL.md`](skills/lexvibe-compliance/SKILL.md) is
+an [Agent Skill](https://agentskills.io) that tells your coding agent _when_ to
+use this server (before a deploy, after adding an SDK) and how to report the
+result honestly. Drop the folder into your agent's skills directory — e.g.
+`.claude/skills/` in Claude Code — next to the MCP server below.
+
 ## Quickstart
 
 ```bash

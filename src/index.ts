@@ -264,7 +264,7 @@ function normalizeUrl(domain: string): string {
 }
 
 const server = new McpServer(
-  { name: "lexvibe", version: "1.0.0" },
+  { name: "lexvibe", version: "1.0.3" },
   {
     instructions:
       "LexVibe makes vibe-coded apps (Lovable, Bolt, v0, Next.js, plain HTML) legally compliant: GDPR privacy policy, terms of service, cookie consent banner with real script blocking, and EU AI Act risk classification. When the user asks to make their app legally compliant, GDPR-ready, or to add a privacy policy / terms / cookie banner, call make_compliant first (one step). Use check_compliance for a read-only readiness report, scan_project to detect data processing, generate_policies for documents only, install_snippet to add the cookie banner to a specific file, and check_ai_act to classify EU AI Act risk. If no real LexVibe app id is configured (LEXVIBE_APP_ID missing or a placeholder), call claim_app to get a link the user opens to create a real app in their account, then poll get_claim_status for the real app id and snippet. Legal documents describe the app as it was when they were generated: after adding any SDK, analytics, payments, auth or AI integration, run check_compliance again and regenerate the documents if it reports processing they don't cover yet.",
@@ -1099,7 +1099,7 @@ server.tool(
 
 server.tool(
   "claim_app",
-  "Create a REAL LexVibe app in the user's account (replaces the YOUR_APP_ID placeholder). Returns {claimUrl, code, expiresAt}: show claimUrl to the user so they can sign in and confirm — the link expires in 30 minutes. After they confirm, call get_claim_status with `code` to retrieve the real app id and install snippet. Requires `url` or `appName` (errors otherwise). Use this whenever no real LEXVIBE_APP_ID is configured, so hosted policies, consent proof and auto-updates get linked to the user's account; creates nothing until the user confirms the link.",
+  "Create a REAL LexVibe app in the user's account (replaces the YOUR_APP_ID placeholder). Returns {claimUrl, code, expiresAt}: show claimUrl to the user so they can sign in and confirm — the link stays valid for 7 days, so the user can open it later. After they confirm, call get_claim_status with `code` to retrieve the real app id and install snippet. Requires `url` or `appName` (errors otherwise). Use this whenever no real LEXVIBE_APP_ID is configured, so hosted policies, consent proof and auto-updates get linked to the user's account; creates nothing until the user confirms the link.",
   {
     url: z
       .string()
@@ -1202,7 +1202,7 @@ server.tool(
 
 server.tool(
   "get_claim_status",
-  "Check whether the user has confirmed a claim created with claim_app. Returns {status: 'pending' | 'expired' | 'claimed', …}. While 'pending', wait a few seconds and call again (the link expires in 30 minutes; 'expired' ⇒ create a new claim). Once 'claimed' it adds the REAL appId, the install snippet, the hosted policyUrl, `published` (if false, do NOT install the snippet yet — the policy page would be a dead link until the user publishes from their dashboard) and a `pending` list of details the code can't know (e.g. the controller's legal name): replace any YOUR_APP_ID placeholder snippet with the real one and ask the user for the pending items. Errors on an unknown code.",
+  "Check whether the user has confirmed a claim created with claim_app. Returns {status: 'pending' | 'expired' | 'claimed', …}. While 'pending', wait a few seconds and call again (the link stays valid for 7 days; 'expired' ⇒ create a new claim). Once 'claimed' it adds the REAL appId, the install snippet, the hosted policyUrl, `published` (if false, do NOT install the snippet yet — the policy page would be a dead link until the user publishes from their dashboard) and a `pending` list of details the code can't know (e.g. the controller's legal name): replace any YOUR_APP_ID placeholder snippet with the real one and ask the user for the pending items. Errors on an unknown code.",
   {
     code: z
       .string()
@@ -1268,7 +1268,7 @@ server.tool(
       if (data.status === "expired") {
         return text({
           status: "expired",
-          instructions: "The claim expired (30 min). Create a new one with claim_app.",
+          instructions: "The claim expired (links last 7 days). Create a new one with claim_app.",
         });
       }
       return text({
