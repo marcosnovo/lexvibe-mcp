@@ -2,6 +2,7 @@
 
 [![lexvibe-mcp MCP server](https://glama.ai/mcp/servers/marcosnovo/lexvibe-mcp/badges/card.svg)](https://glama.ai/mcp/servers/marcosnovo/lexvibe-mcp)
 [![lexvibe-mcp MCP server](https://glama.ai/mcp/servers/marcosnovo/lexvibe-mcp/badges/score.svg)](https://glama.ai/mcp/servers/marcosnovo/lexvibe-mcp)
+[![Lexvibe MCP server](https://mcprush.com/badge/lexvibe-mcp/card.svg)](https://mcprush.com/to/lexvibe-mcp?ref=badge)
 
 [LexVibe](https://golexvibe.com?utm_source=mcp-readme) **MCP** server — one-step legal compliance for vibe-coded apps
 (Lovable, Bolt, v0, Next.js, plain HTML). Wire it into your AI assistant
