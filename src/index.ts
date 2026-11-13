@@ -86,7 +86,15 @@ const APP_ID = process.env.LEXVIBE_APP_ID ?? "YOUR_APP_ID";
  * (generación anónima sin IA) — mismo mensaje que el MCP remoto, para que el
  * agente pueda avisar al usuario de que aún no están personalizados.
  */
-const TEMPLATE_NOTE = `Generated from the standard template — not yet AI-personalized for this app and not reviewed by a human lawyer. For AI-tailored documents that are hosted, versioned and auto-updated when regulations change, create the app at ${API}/dashboard/activate.`;
+const TEMPLATE_NOTE = `Generated from the standard template — not yet AI-personalized for this app and not reviewed by a human lawyer. Publishing it at a hosted address is free with a LexVibe app (call claim_app); an AI rewrite tailored to the app costs €9 once per app, and automatic updates when regulations change come with Pro.`;
+
+/**
+ * Texto para que el agente se lo enseñe a la persona al reclamar la app. Copia
+ * LITERAL de CLAIM_USER_MESSAGE de apps/web/src/lib/mcp/next-steps.ts (este
+ * paquete no puede importar de apps/web): un test de paridad lo vigila.
+ */
+const CLAIM_USER_MESSAGE =
+  "Open {claimUrl} to set up your app in LexVibe. You'll first see what will be created (app name, site, markets and what was detected), then sign in with your email — no password — and confirm. Publishing the template privacy policy and terms, and installing the cookie banner on a website, is free. Having the documents rewritten by AI for your app is optional and costs €9 once per app. The link is valid for 7 days, and once you confirm I'll pick up your real app id and finish the setup.";
 
 /**
  * Datos que el código NO puede saber y que el humano debe completar tras crear
@@ -179,7 +187,11 @@ async function apiFetch(url: string, init?: RequestInit, timeoutMs = 20_000): Pr
     typeof AbortSignal !== "undefined" && typeof AbortSignal.timeout === "function"
       ? AbortSignal.timeout(timeoutMs)
       : undefined;
-  return fetch(url, { ...init, signal });
+  // Se identifica ante la API: sin esto, lo que genera el MCP se contaba como
+  // tráfico de la web (`generate_anonymous` con `source: "web"`).
+  const headers = new Headers(init?.headers);
+  headers.set("x-lexvibe-client", "mcp-stdio");
+  return fetch(url, { ...init, headers, signal });
 }
 
 /** `res.json()` con tope de bytes — mismo motivo que `apiFetch`. */
@@ -1080,7 +1092,7 @@ server.tool(
               `Missing human facts the code can't know: ${missing.map((m) => m.id).join(", ")}. Answer them (see agentPrompt) and re-run make_compliant passing appName / entity / contactEmail / markets for complete documents.`,
             ]
           : []),
-        `Publish and auto-update your documents (and persist them) at ${API}/dashboard/activate.`,
+        `Publish these documents at a hosted address for free (and keep them in your LexVibe account): call claim_app, or open ${API}/activate.`,
         ...(id === "YOUR_APP_ID"
           ? [
               "The snippet uses the placeholder app id YOUR_APP_ID — call claim_app now: it returns a link the user opens to create a real app in their LexVibe account; then get_claim_status gives you the real app id and snippet to replace the placeholder. Without it, hosted policies and consent proof won't be linked to their account.",
@@ -1192,8 +1204,9 @@ server.tool(
       }>(res);
       return text({
         ...data,
+        userMessage: CLAIM_USER_MESSAGE.replace("{claimUrl}", data.claimUrl),
         instructions:
-          "Show this link to the user and ask them to open it, sign in and confirm — that creates the app in THEIR LexVibe account. After they confirm, call get_claim_status with this code to retrieve the real app id and snippet, then replace any placeholder (YOUR_APP_ID) snippet you installed.",
+          "Show userMessage to the user, translated into their language and with the link intact, and ask them to open it. They can review the app before signing in. After they confirm, call get_claim_status with this code to retrieve the real app id and snippet, then replace any placeholder (YOUR_APP_ID) snippet you installed.",
       });
     } catch (err) {
       return toolError(`Could not create the claim: ${(err as Error).message}`);

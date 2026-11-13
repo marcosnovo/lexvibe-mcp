@@ -13,7 +13,7 @@
  * Uso: node scripts/smoke.mjs [ruta/al/dist/index.js]
  */
 import { spawn } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -52,6 +52,8 @@ const timer = setTimeout(() => {
 }, 20_000);
 
 let buffer = "";
+/** Resultado de `initialize` (lo que el servidor dice ser). */
+let initResult = null;
 child.stdout.on("data", (chunk) => {
   buffer += chunk.toString();
   let index;
@@ -65,6 +67,7 @@ child.stdout.on("data", (chunk) => {
     } catch {
       continue;
     }
+    if (message.id === 1) initResult = message.result ?? null;
     if (message.id === 2) finish(message);
   }
 });
@@ -89,6 +92,25 @@ function finish(message) {
     for (const param of params) {
       if (!props.includes(param)) problems.push(`${name}: falta el parámetro "${param}"`);
     }
+  }
+  // La versión que el servidor anuncia, la del paquete y las dos de server.json
+  // (registro MCP) tienen que ser la misma. `serverInfo` y la telemetría la
+  // leen de package.json (src/version.ts), así que aquí se comprueba que eso
+  // funciona en el artefacto COMPILADO; server.json se escribe a mano para el
+  // registro y es lo que de verdad puede quedarse atrás. Antes el `serverInfo`
+  // también era una cadena a mano y el 1.0.3 publicado se anunciaba como 1.0.0.
+  const pkgVersion = JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8")).version;
+  const announced = initResult?.serverInfo?.version;
+  if (announced !== pkgVersion) {
+    problems.push(`serverInfo.version (${announced}) no coincide con package.json (${pkgVersion})`);
+  }
+  const registry = JSON.parse(readFileSync(join(ROOT, "server.json"), "utf8"));
+  for (const [where, version] of [
+    ["server.json → version", registry.version],
+    ["server.json → packages[0].version", registry.packages?.[0]?.version],
+  ]) {
+    if (version !== pkgVersion)
+      problems.push(`${where} (${version}) no coincide con package.json (${pkgVersion})`);
   }
   const extra = tools.map((t) => t.name).filter((n) => !(n in EXPECTED));
   if (extra.length > 0) {

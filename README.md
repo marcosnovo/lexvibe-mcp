@@ -13,6 +13,21 @@ banner with real script blocking, and an EU AI Act risk check.
 Not using an AI coding tool? The same checks run in the browser: paste your URL
 into the [free website checker](https://golexvibe.com/check?utm_source=mcp-readme) — no signup.
 
+## Quickstart — nothing to configure
+
+**Remote (no install):** add `https://golexvibe.com/api/mcp` as a custom connector
+(Claude, ChatGPT, Cursor…). No auth, no API key, no account needed to start.
+
+**Local (stdio):**
+
+```bash
+claude mcp add lexvibe -- npx -y @lexvibe/mcp
+```
+
+No environment variables are required. When you want hosted documents, the agent
+calls `claim_app` and gives you a link: you review the app, sign in with your email
+and confirm. Publishing the template documents and installing the cookie banner is free.
+
 ## Tools
 
 | Tool                | What it does                                                                                                                                                           |
@@ -43,8 +58,8 @@ answer by reading the repo (company entity, contact email, target markets), so
 there are no forms to fill.
 
 No app id yet? The agent calls `claim_app` and hands you a link: open it, sign
-in and confirm — that creates the real app in **your** LexVibe account (hosted,
-auto-updated policies and consent proof linked to you). The agent then picks up
+in and confirm — that creates the real app in **your** LexVibe account (hosted
+policies — free to publish — and consent proof linked to you). The agent then picks up
 the real app id via `get_claim_status` and replaces any `YOUR_APP_ID`
 placeholder automatically.
 
@@ -83,7 +98,7 @@ use this server (before a deploy, after adding an SDK) and how to report the
 result honestly. Drop the folder into your agent's skills directory — e.g.
 `.claude/skills/` in Claude Code — next to the MCP server below.
 
-## Quickstart
+## Setup per client
 
 ```bash
 npx -y @lexvibe/mcp   # or build from source: npm run build -w packages/mcp
@@ -96,10 +111,7 @@ npx -y @lexvibe/mcp   # or build from source: npm run build -w packages/mcp
   "mcpServers": {
     "lexvibe": {
       "command": "npx",
-      "args": ["-y", "@lexvibe/mcp"],
-      "env": {
-        "LEXVIBE_APP_ID": "your-app-id"
-      }
+      "args": ["-y", "@lexvibe/mcp"]
     }
   }
 }
@@ -112,10 +124,7 @@ npx -y @lexvibe/mcp   # or build from source: npm run build -w packages/mcp
   "mcpServers": {
     "lexvibe": {
       "command": "npx",
-      "args": ["-y", "@lexvibe/mcp"],
-      "env": {
-        "LEXVIBE_APP_ID": "your-app-id"
-      }
+      "args": ["-y", "@lexvibe/mcp"]
     }
   }
 }
@@ -123,6 +132,8 @@ npx -y @lexvibe/mcp   # or build from source: npm run build -w packages/mcp
 
 Claude Desktop uses the same `mcpServers` structure in
 `claude_desktop_config.json`.
+
+Already have a LexVibe app? Set `LEXVIBE_APP_ID` (see Configuration) so snippets use it directly.
 
 ### Codex CLI (`~/.codex/config.toml`)
 
@@ -139,7 +150,6 @@ Or by hand:
 [mcp_servers.lexvibe]
 command = "npx"
 args = ["-y", "@lexvibe/mcp"]
-env = { LEXVIBE_APP_ID = "YOUR_APP_ID" }
 ```
 
 Project-scoped config lives in `.codex/config.toml` (trusted projects only).
@@ -192,13 +202,13 @@ Full per-platform setup guide: <https://golexvibe.com/docs/integrations>
 
 ## Configuration
 
-| Variable             | Default                 | Purpose                                                            |
-| -------------------- | ----------------------- | ------------------------------------------------------------------ |
-| `LEXVIBE_APP_ID`     | `YOUR_APP_ID`           | Your LexVibe app id (links the snippet to your hosted policies)    |
-| `LEXVIBE_API_URL`    | `https://golexvibe.com` | LexVibe instance that generates documents and classifies AI risk   |
-| `LEXVIBE_CDN_URL`    | `https://golexvibe.com` | Host the widget script is served from (self-hosting only)          |
-| `LEXVIBE_EVENTS_URL` | LexVibe events endpoint | Override where anonymous tool-usage events are sent (self-hosting) |
-| `LEXVIBE_TELEMETRY`  | `1`                     | Set to `0` / `false` / `off` to disable usage telemetry            |
+| Variable             | Default                 | Purpose                                                                                                                                    |
+| -------------------- | ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| `LEXVIBE_APP_ID`     | — (optional)            | Only if you already have an app. Without it, snippets use the YOUR_APP_ID placeholder and the agent offers claim_app to create a real one. |
+| `LEXVIBE_API_URL`    | `https://golexvibe.com` | LexVibe instance that generates documents and classifies AI risk                                                                           |
+| `LEXVIBE_CDN_URL`    | `https://golexvibe.com` | Host the widget script is served from (self-hosting only)                                                                                  |
+| `LEXVIBE_EVENTS_URL` | LexVibe events endpoint | Override where anonymous tool-usage events are sent (self-hosting)                                                                         |
+| `LEXVIBE_TELEMETRY`  | `1`                     | Set to `0` / `false` / `off` to disable usage telemetry                                                                                    |
 
 ## Usage analytics
 
